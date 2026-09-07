@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent ops console</title>
+<style>
+  :root{
+    --bg:#101319; --panel:#181d27; --panel-2:#1e2531; --line:#2b3340;
+    --ink:#e7ebf2; --muted:#8b94a5; --dim:#5c6577;
+    --live:#33d6a4; --live-dim:#1c5f4b;
+    --work:#f0a83c; --work-dim:#5c421a;
+    --dead:#ff5f5f; --dead-dim:#5c2020;
+    --warm:#e8b98f;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 24px 40px}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  header h1{font-size:17px;font-weight:600;margin:0;letter-spacing:.2px}
+  header .sub{color:var(--muted);font-size:13px;font-family:var(--mono)}
+  .status{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);
+    display:flex;align-items:center;gap:7px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--live)}
+  .status.stalled .dot{background:var(--dead)} .status.stalled{color:var(--dead)}
+  .status.recovered .dot{background:var(--work)} .status.recovered{color:var(--work)}
+  .status.offline .dot{background:var(--dim)} .status.offline{color:var(--dim)}
+
+  .controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    padding:12px 0 16px;border-bottom:1px solid var(--line);margin-bottom:16px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:transparent;border:none;color:var(--muted);
+    font-family:var(--mono);font-size:12.5px;padding:8px 14px;cursor:pointer}
+  .seg button.on{background:var(--panel-2);color:var(--ink)}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg .lbl{font-family:var(--mono);font-size:10.5px;color:var(--dim);align-self:center;padding-right:2px}
+  .btn{font-family:var(--mono);font-size:12.5px;padding:8px 15px;border-radius:8px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);cursor:pointer}
+  .btn:hover{border-color:var(--dim)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.kill{border-color:var(--dead-dim);color:#ff9a9a;background:#241417}
+  .btn.kill:not(:disabled){animation:arm 1.8s ease-in-out infinite}
+  .btn.kill:hover:not(:disabled){background:#31171b;border-color:var(--dead)}
+  @keyframes arm{0%,100%{box-shadow:0 0 0 0 rgba(255,95,95,0)}50%{box-shadow:0 0 0 3px rgba(255,95,95,.12)}}
+  .spacer{flex:1}
+  .hint{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  .goalin{font-family:var(--mono);font-size:12.5px;padding:8px 12px;border-radius:8px;
+    border:1px solid var(--line);background:#12161f;color:var(--ink);min-width:230px;flex:1}
+  .goalin::placeholder{color:var(--dim)}
+  .goalin:focus{outline:none;border-color:var(--warm)}
+  .btn.plan{border-color:#3a3420;color:var(--warm);background:#221d10}
+  .btn.plan:hover:not(:disabled){border-color:var(--work);background:#2a2313}
+
+  .stage{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;align-items:start}
+  .stage.planning{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .stage.planning .plangraph{height:560px}
+  .stage.planning .genout{height:508px}
+  @media(max-width:860px){.stage{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .card h2{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.9px;
+    color:var(--muted);margin:0;padding:13px 16px;border-bottom:1px solid var(--line)}
+
+  .req{padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+  .req .who{font-family:var(--mono);font-size:12px;color:var(--warm);white-space:nowrap;padding-top:1px}
+  .req .msg{color:#dfe4ec}
+  .req .msg b{color:#fff;font-weight:600}
+
+  svg{display:block;width:100%;height:auto}
+  .nd rect{fill:var(--panel-2);stroke:var(--line);stroke-width:1;transition:fill .25s,stroke .25s}
+  .nd .t1{fill:#cdd4e0;font-family:var(--mono);font-size:13px;font-weight:500}
+  .nd .t2{fill:var(--dim);font-family:var(--mono);font-size:10.5px}
+  .nd.active rect{stroke:var(--live);fill:#16241f}
+  .nd.active .t1{fill:#eafff6}
+  .nd.done rect{stroke:var(--live-dim)}
+  .nd.done .t1{fill:#bfe9d8}
+  .nd.done .t2{fill:var(--live-dim)}
+  .nd.off rect{fill:#241316;stroke:var(--dead)}
+  .nd.off .t1{fill:#ff9a9a} .nd.off .t2{fill:var(--dead-dim)}
+  .nd.flag rect{fill:#2a2113;stroke:var(--work)}
+  .nd.flag .t1{fill:var(--warm)} .nd.flag .t2{fill:var(--work-dim)}
+  .lk{stroke:var(--line);stroke-width:1.5;fill:none;transition:stroke .25s,opacity .25s}
+  .lk.mesh{stroke-dasharray:2 5;opacity:.5}
+  .lk.flow{stroke:var(--live);stroke-width:2.5;stroke-dasharray:6 6;animation:dash .7s linear infinite}
+  .lk.reroute{stroke:var(--work);stroke-width:2.5;opacity:1;stroke-dasharray:6 6;animation:dash .7s linear infinite}
+  .lk.dead{stroke:var(--dead-dim);stroke-dasharray:3 4;opacity:.7;animation:none}
+  @keyframes dash{to{stroke-dashoffset:-24}}
+  @media(prefers-reduced-motion:reduce){.lk.flow,.lk.reroute{animation:none}.btn.kill{animation:none}}
+
+  .log{padding:6px 0 10px;height:472px;overflow-y:auto;font-family:var(--mono);font-size:12.5px}
+  .log .ln{padding:7px 16px;border-bottom:1px solid #141a23;display:flex;gap:10px;
+    opacity:0;transform:translateY(3px);animation:in .28s ease forwards}
+  @keyframes in{to{opacity:1;transform:none}}
+  .log .ag{white-space:nowrap;min-width:92px}
+  .log .ag.orch{color:#9db4ff}.log .ag.research{color:#5ad0c0}.log .ag.draft{color:#c6a4f0}
+  .log .ag.valid{color:#8fd07a}.log .ag.system{color:var(--dim)}.log .ag.done{color:var(--live)}
+  .log .tx{color:#c6cdda}
+  .log .ln.warn .tx{color:#ff9a9a}.log .ln.warn .ag{color:var(--dead)}
+  .log .ln.good .tx{color:#8fe6c2}.log .ln.reroute .ag{color:var(--work)}.log .ln.reroute .tx{color:#f0c88c}
+  .log .empty{padding:20px 16px;color:var(--dim)}
+
+  /* --- finale: model-driven plan graph --- */
+  .plangraph{padding:10px 8px;height:472px;overflow:hidden;display:flex;justify-content:center;align-items:center}
+  .plangraph svg{display:block;width:100%;height:100%}   /* viewBox + preserveAspectRatio meet → auto-fit any aspect */
+  .plangraph .thinking{padding:26px 16px;color:var(--muted);font-family:var(--mono);font-size:12.5px}
+  .plangraph .thinking b{color:var(--warm)}
+  #ah path{fill:var(--line)}                              /* shared arrowhead, themed via --line */
+  .pedge{stroke:var(--line);stroke-width:1.6;fill:none;opacity:0;transition:opacity .3s}
+  .pedge.on{opacity:.7}
+  .pedge.cust{stroke-dasharray:5 4}
+  .pedge.cust.on{stroke:var(--work);opacity:.9}
+  .pnode{opacity:0;transition:opacity .3s}
+  .pnode.on{opacity:1}
+  .pnode rect{fill:var(--panel-2);stroke:var(--live-dim);stroke-width:1.3}
+  .pnode .pt1{fill:#e3ebf5;font-family:var(--mono);font-size:12px;font-weight:500}
+  .pnode .pt2{fill:var(--dim);font-family:var(--mono);font-size:10px}
+  .pnode.goal rect{fill:#141a24;stroke:var(--line);stroke-dasharray:3 3}
+  .pnode.goal .pt1{fill:var(--warm)}
+  .pnode.custom rect{fill:#2a2113;stroke:var(--work)}
+  .pnode.custom .pt1{fill:var(--warm)} .pnode.custom .pt2{fill:var(--work-dim)}
+  .pnode.term rect{stroke:var(--live)} .pnode.term .pt1{fill:#eafff6}
+
+  /* --- finale: generated artifact panel --- */
+  .gentabs{display:flex;gap:8px;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .gentabs button{font-family:var(--mono);font-size:12px;padding:5px 12px;border:1px solid var(--line);
+    border-radius:7px;background:transparent;color:var(--muted);cursor:pointer}
+  .gentabs button.on{background:var(--panel-2);color:var(--ink)}
+  .gencap{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--dim);
+    max-width:52%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .genout{margin:0;padding:12px 14px;height:420px;overflow:auto;font-family:var(--mono);
+    font-size:12px;line-height:1.55;color:#c6cdda;white-space:pre;tab-size:2}
+  .genout .c{color:#5c6577;font-style:italic}  /* comment */
+  .genout .s{color:#8fe6c2}                     /* string  */
+  .genout .k{color:#c6a4f0}                     /* keyword */
+  .genout .n{color:#e8b98f}                     /* number  */
+  .genout .fn{color:#9db4ff}                    /* def name */
+  .genout .b{color:#5ad0c0}                     /* builtin */
+  .genout .jk{color:#9db4ff}                    /* json key */
+
+  /* --- Option C: executable plan graph --- */
+  .eedge{stroke:var(--line);stroke-width:1.6;fill:none;opacity:.5;transition:stroke .25s,opacity .25s}
+  .eedge.redundant{stroke-dasharray:2 5;opacity:.4}
+  .eedge.flow{stroke:var(--live);stroke-width:2.5;stroke-dasharray:6 6;opacity:1;animation:dash .7s linear infinite}
+  .eedge.reroute{stroke:var(--work);stroke-width:2.5;stroke-dasharray:6 6;opacity:1;animation:dash .7s linear infinite}
+  .eedge.dead{stroke:var(--dead-dim);stroke-dasharray:3 4;opacity:.7}
+  .pnode.exec{opacity:0;transform:scale(.94);transform-box:fill-box;transform-origin:center;transition:opacity .3s ease,transform .3s ease}
+  .pnode.exec.shown{opacity:1;transform:scale(1)}   /* pop-in reveal during the beat */
+  .pnode.exec rect{transition:fill .25s,stroke .25s}
+  .pnode.exec.idle rect{fill:var(--panel-2);stroke:var(--line)}
+  @keyframes nodepulse{0%,100%{stroke-width:1.4}50%{stroke-width:3}}
+  .pnode.exec.active rect{stroke:var(--live);fill:#16241f;animation:nodepulse 1.15s ease-in-out infinite}
+  .pnode.exec.active .pt1{fill:#eafff6}
+  .pnode.exec.done rect{stroke:var(--live-dim)}
+  .pnode.exec.done .pt1{fill:#bfe9d8}
+  .pnode.exec.off rect{fill:#241316;stroke:var(--dead)}
+  .pnode.exec.off .pt1{fill:#ff9a9a}
+  .pnode.exec.flag rect{fill:#2a2113;stroke:var(--work)}
+  .pnode.exec.flag .pt1{fill:var(--warm)}
+  .pnode.exec.coord rect{stroke-dasharray:4 3}
+  /* human-in-the-loop gate — the final sign-off the AI can't skip */
+  .pnode.human rect{fill:#2a2113;stroke:var(--work);stroke-width:1.7;stroke-dasharray:5 3}
+  .pnode.human .pt1{fill:var(--warm)}
+  .pnode.human .pt2{fill:var(--work-dim)}
+  .pnode.human .hicon{fill:var(--work)}
+
+  /* --- side blackboard (live shared state) — shared by exec (#bbPanel) and run case (#caseBB) --- */
+  .bbpanel{margin:0;padding:12px 14px;overflow:auto;font-family:var(--mono);
+    font-size:12.5px;line-height:1.65;color:#c6cdda}
+  #bbPanel{height:420px}                 /* exec: sits under the plan tabs */
+  .stage.planning #bbPanel{height:508px}
+  #caseBB{height:472px}                  /* run case: matches the case log height */
+  .bbpanel .bbrow{padding:1px 6px;border-radius:5px;transition:background .35s}
+  .bbpanel .bbnew{background:#16241f}
+  .bbpanel .bbkey{color:#9db4ff}
+  .bbpanel .bbstr{color:#8fe6c2}
+  .bbpanel .bbnum{color:var(--warm)}
+  .bbpanel .bbpn{color:var(--dim)}
+
+  /* ===========================================================================
+     PRESENTATION MODE — legibility from the back of the room. Toggle with the
+     "P" key, the header button, or load the page with ?present=1. Widens the
+     layout to fill the projector (the default 1180px cap wastes most of a big
+     screen) and scales all type up ~1.6x. The topology / plan / exec graphs are
+     SVG, so they scale automatically as their containers grow — no intrinsic
+     font changes there (keeps node text inside the boxes). Purely presentational:
+     nothing about the demo behaviour changes. */
+  body.present{font-size:22px}
+  body.present .wrap{max-width:min(1840px,95vw);padding:30px 40px 56px}
+  body.present header h1{font-size:30px}
+  body.present header .sub{font-size:18px}
+  body.present .status{font-size:18px}
+  body.present .dot{width:12px;height:12px}
+  body.present .stage{gap:26px}
+  body.present .seg button,body.present .btn{font-size:18px;padding:12px 20px}
+  body.present .seg .lbl{font-size:14px}
+  body.present .hint{font-size:16px}
+  body.present .goalin{font-size:18px;padding:12px 16px;min-width:320px}
+  body.present .card h2{font-size:17px;padding:16px 20px}
+  body.present .req{padding:20px 22px}
+  body.present .req .who{font-size:18px}
+  body.present .log{font-size:18px;height:64vh}
+  body.present .log .ln{padding:10px 20px}
+  body.present .log .ag{min-width:128px}
+  body.present .plangraph{height:64vh}
+  body.present .stage.planning .plangraph{height:70vh}
+  body.present .gentabs button{font-size:17px;padding:8px 16px}
+  body.present .gencap{font-size:15px}
+  body.present .genout{font-size:17px;height:56vh}
+  body.present .stage.planning .genout{height:62vh}
+  body.present .bbpanel{font-size:18px}
+  body.present #bbPanel{height:56vh}
+  body.present .stage.planning #bbPanel{height:62vh}
+  body.present #caseBB{height:64vh}
+  #presentBtn{font-family:var(--mono);font-size:12px;color:var(--muted);background:transparent;
+    border:1px solid var(--line);border-radius:7px;padding:5px 10px;cursor:pointer;margin-left:12px}
+  #presentBtn:hover{border-color:var(--dim);color:var(--ink)}
+  body.present #presentBtn{font-size:16px;color:var(--warm);border-color:#3a3420;background:#221d10}
+
+  /* theme toggle button — styled like the presentation button */
+  #themeBtn{font-family:var(--mono);font-size:12px;color:var(--muted);background:transparent;
+    border:1px solid var(--line);border-radius:7px;padding:5px 10px;cursor:pointer;margin-left:8px}
+  #themeBtn:hover{border-color:var(--dim);color:var(--ink)}
+  body.present #themeBtn{font-size:16px}
+
+  /* ===========================================================================
+     LIGHT THEME — for a bright / lit room, where a dark UI washes out to gray on
+     a projector. Toggle with the "T" key, the header button, or ?theme=light.
+     Additive and scoped to body.light: first redefine the color tokens for light,
+     then re-spec the handful of rules that baked in dark tints. The dark theme
+     (the base cascade) is left completely untouched. */
+  body.light{
+    --bg:#eef1f5; --panel:#ffffff; --panel-2:#f1f4f8; --line:#d5dbe4;
+    --ink:#1b2230; --muted:#556072; --dim:#7a8494;
+    --live:#0f9d6e; --live-dim:#5cae8c;
+    --work:#c67a12; --work-dim:#c79a5e;
+    --dead:#d23b3b; --dead-dim:#d79a9a;
+    --warm:#a76a2e;
+  }
+  /* controls: inputs/buttons that had dark fills */
+  body.light .goalin{background:#ffffff}
+  body.light .btn.kill{color:#b3241f;background:#fdeceb;border-color:#f0b6b3}
+  body.light .btn.kill:hover:not(:disabled){background:#fbdedb;border-color:var(--dead)}
+  body.light .btn.plan{color:#9a5a12;background:#fbf1dd;border-color:#e6cfa0}
+  body.light .btn.plan:hover:not(:disabled){background:#f6e8c8;border-color:var(--work)}
+  body.light.present #presentBtn{color:#9a5a12;background:#fbf1dd;border-color:#e6cfa0}
+  /* request card */
+  body.light .req .msg{color:#2a2f3a}
+  body.light .req .msg b{color:#000}
+  /* topology nodes (SVG) */
+  body.light .nd .t1{fill:#2a2f3a}
+  body.light .nd.active rect{fill:#e2f6ee}
+  body.light .nd.active .t1{fill:#0b6045}
+  body.light .nd.done .t1{fill:#2f7d62}
+  body.light .nd.done .t2{fill:#4b9c7e}
+  body.light .nd.off rect{fill:#fdecec}
+  body.light .nd.off .t1{fill:#b3241f}
+  body.light .nd.off .t2{fill:#c98a8a}
+  body.light .nd.flag rect{fill:#fbf1dd}
+  body.light .nd.flag .t1{fill:#9a5a12}
+  /* case log */
+  body.light .log .ln{border-bottom-color:#eceff3}
+  body.light .log .ag.orch{color:#3b5bd0}
+  body.light .log .ag.research{color:#0f9285}
+  body.light .log .ag.draft{color:#7b4fc0}
+  body.light .log .ag.valid{color:#3f8f2f}
+  body.light .log .tx{color:#39414f}
+  body.light .log .ln.warn .tx{color:#b3241f}
+  body.light .log .ln.good .tx{color:#0f8f66}
+  body.light .log .ln.reroute .tx{color:#a5680f}
+  /* finale: model-driven plan graph (SVG) */
+  body.light .pnode .pt1{fill:#2a2f3a}
+  body.light .pnode.goal rect{fill:#eef1f5}
+  body.light .pnode.custom rect{fill:#fbf1dd}
+  body.light .pnode.custom .pt1{fill:#9a5a12}
+  /* Option C: exec node states (SVG) */
+  body.light .pnode.exec.active rect{fill:#e2f6ee}
+  body.light .pnode.exec.active .pt1{fill:#0b6045}
+  body.light .pnode.exec.done .pt1{fill:#2f7d62}
+  body.light .pnode.exec.off rect{fill:#fdecec}
+  body.light .pnode.exec.off .pt1{fill:#b3241f}
+  body.light .pnode.exec.flag rect{fill:#fbf1dd}
+  body.light .pnode.exec.flag .pt1{fill:#9a5a12}
+  body.light .pnode.human rect{fill:#fbf1dd;stroke:var(--work)}
+  body.light .pnode.human .pt1{fill:#9a5a12}
+  body.light .pnode.human .pt2{fill:#b07a2e}
+  body.light .pnode.human .hicon{fill:#c67a12}
+  /* generated code panel — syntax colors for dark ink on light */
+  body.light .genout{color:#39414f}
+  body.light .genout .c{color:#8a93a1}
+  body.light .genout .s{color:#0f8f66}
+  body.light .genout .k{color:#7b4fc0}
+  body.light .genout .n{color:#b06a12}
+  body.light .genout .fn{color:#3b5bd0}
+  body.light .genout .b{color:#0f9285}
+  body.light .genout .jk{color:#3b5bd0}
+  /* live blackboard panel */
+  body.light .bbpanel{color:#39414f}
+  body.light .bbpanel .bbnew{background:#e2f6ee}
+  body.light .bbpanel .bbkey{color:#3b5bd0}
+  body.light .bbpanel .bbstr{color:#0f8f66}
+  body.light .bbpanel .bbnum{color:#b06a12}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h2 class="sr-only">Interactive demo of an agent workflow, with a kill switch that either freezes the task or reroutes it peer-to-peer</h2>
+  <header>
+    <h1>Agent ops console</h1>
+    <span class="sub" id="caseTag">marketing suite</span>
+    <span class="status" id="status"><span class="dot"></span><span id="statusText">system healthy</span></span>
+    <button id="themeBtn" onclick="toggleTheme()" title="Theme (T) — light reads better on a projector in a lit room">dark theme</button>
+    <button id="presentBtn" onclick="togglePresent()" title="Presentation mode (P) — bigger text, fills the screen">presentation</button>
+  </header>
+
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Scenario">
+      <span class="lbl">scenario</span>
+      <button id="sCamp" class="on" onclick="setScenario('campaign')">campaign</button>
+      <button id="sCrea" onclick="setScenario('creative')">creative</button>
+    </div>
+    <div class="seg" role="group" aria-label="Topology mode">
+      <span class="lbl">mode</span>
+      <button id="mBoss" class="on" onclick="setMode('boss')">orchestrator</button>
+      <button id="mMesh" onclick="setMode('mesh')">hybrid mesh</button>
+    </div>
+    <button class="btn" id="runBtn" onclick="runCase()">Run case</button>
+    <button class="btn kill" id="killBtn" onclick="killOrch()" disabled>Kill orchestrator</button>
+    <button class="btn" id="resetBtn" onclick="resetAll()">Reset</button>
+    <span class="spacer"></span>
+    <span class="hint" id="hint">boss coordinates all three specialists</span>
+  </div>
+
+  <div class="controls" style="border-top:none;border-bottom:1px solid var(--line);padding-top:0;margin-top:-8px">
+    <span class="seg lbl" style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">finale</span>
+    <input class="goalin" id="goalInput" placeholder="give the agent an unseen goal — it plans it live…"
+           onkeydown="if(event.key==='Enter')executePlan()">
+    <button class="btn plan" id="planBtn" onclick="composePlan()" style="display:none">Compose plan</button>
+    <button class="btn plan" id="execBtn" onclick="executePlan()">Compose &amp; run</button>
+    <span class="hint">claude composes the plan, then it runs under the topology · payloads stay fake</span>
+  </div>
+
+  <div class="stage">
+    <div>
+      <div class="card" id="reqCard" style="margin-bottom:18px">
+        <h2>Incoming request</h2>
+        <div class="req">
+          <span class="who" id="reqWho">marketer</span>
+          <span class="msg" id="reqMsg"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2 id="leftHead">Topology</h2>
+        <div id="planGraph" class="plangraph" style="display:none"></div>
+        <svg id="topoSvg" viewBox="0 0 560 400" role="img" aria-label="Agent topology graph">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </marker>
+          </defs>
+          <path id="l_req_orch" class="lk" d="M120,196 C160,196 175,80 205,72" marker-end="url(#ah)"/>
+          <path id="l_orch_res" class="lk" d="M285,96 C285,120 283,128 282,146" marker-end="url(#ah)"/>
+          <path id="l_orch_dra" class="lk" d="M255,96 C230,150 232,200 258,223" marker-end="url(#ah)"/>
+          <path id="l_orch_val" class="lk" d="M240,96 C150,170 150,300 198,322" marker-end="url(#ah)"/>
+          <path id="l_res_resp" class="lk" d="M362,172 C420,150 430,180 438,198" marker-end="url(#ah)"/>
+          <path id="l_dra_resp" class="lk" d="M362,247 C410,235 420,220 440,214" marker-end="url(#ah)"/>
+          <path id="l_val_resp" class="lk" d="M362,322 C420,300 432,250 442,230" marker-end="url(#ah)"/>
+          <path id="m_dra_val" class="lk mesh" d="M280,277 L280,296" marker-end="url(#ah)"/>
+          <path id="m_val_resp" class="lk mesh" d="M362,326 C440,326 470,250 480,232" marker-end="url(#ah)"/>
+
+          <g class="nd" id="n_req"><rect x="30" y="176" width="90" height="44" rx="8"/>
+            <text class="t1" id="lbl_req1" x="75" y="202" text-anchor="middle">request</text></g>
+          <g class="nd" id="n_orch"><rect x="205" y="44" width="160" height="52" rx="9"/>
+            <text class="t1" id="lbl_orch1" x="285" y="66" text-anchor="middle">orchestrator</text>
+            <text class="t2" id="lbl_orch2" x="285" y="82" text-anchor="middle">coordinates the case</text></g>
+          <g class="nd" id="n_res"><rect x="200" y="150" width="164" height="52" rx="9"/>
+            <text class="t1" id="lbl_res1" x="282" y="172" text-anchor="middle">research agent</text>
+            <text class="t2" id="lbl_res2" x="282" y="188" text-anchor="middle">pulls the account</text></g>
+          <g class="nd" id="n_dra"><rect x="200" y="225" width="164" height="52" rx="9"/>
+            <text class="t1" id="lbl_dra1" x="282" y="247" text-anchor="middle">draft agent</text>
+            <text class="t2" id="lbl_dra2" x="282" y="263" text-anchor="middle">writes the fix</text></g>
+          <g class="nd" id="n_val"><rect x="200" y="300" width="164" height="52" rx="9"/>
+            <text class="t1" id="lbl_val1" x="282" y="322" text-anchor="middle">validation agent</text>
+            <text class="t2" id="lbl_val2" x="282" y="338" text-anchor="middle">checks before it goes live</text></g>
+          <g class="nd" id="n_resp"><rect x="440" y="192" width="100" height="44" rx="8"/>
+            <text class="t1" id="lbl_resp1" x="490" y="218" text-anchor="middle">response</text></g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 id="rightHead">Case log</h2>
+      <div id="caseTabs" class="gentabs" style="display:none">
+        <button id="ctLog" class="on" onclick="showCaseTab('log')">case log</button>
+        <button id="ctBB" onclick="showCaseTab('bb')">blackboard</button>
+        <span class="gencap" id="caseCap">shared state · updates live</span>
+      </div>
+      <div class="log" id="log"><div class="empty">Press <b>Run case</b> to work the request. Kill the orchestrator mid-case to see what the topology does.</div></div>
+      <div id="caseBB" class="bbpanel" style="display:none"></div>
+      <div id="genPanel" style="display:none">
+        <div class="gentabs">
+          <button id="tabBB" onclick="showTab('bb')">blackboard</button>
+          <button id="tabJson" class="on" onclick="showTab('json')">plan.json</button>
+          <button id="tabCode" onclick="showTab('code')">plan.py</button>
+          <span class="gencap" id="genCap"></span>
+        </div>
+        <pre class="genout" id="genOut"></pre>
+        <div id="bbPanel" class="bbpanel" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------------------------------------------------------------------
+ * PRESENTATION ONLY. Labels, node text, agent names — keyed by scenario. The
+ * backend owns the *sequence* and the *log text*; this file just paints the
+ * events that arrive over the websocket. There is no scripted timeline here.
+ * ------------------------------------------------------------------------- */
+const SC={
+  campaign:{
+    tag:"marketing suite", who:"marketer",
+    msg:'Launch a <b>win-back journey</b> for cart-abandoners <b>before the weekend</b>.',
+    nodes:{req:"request",orch:["campaign orchestrator","is it ready to activate?"],
+      res:["audience agent","customer data platform"],dra:["content agent","content studio"],
+      val:["brand check","governance + QA"],resp:"activate"},
+    ag:{orch:"orchestrator",res:"cdp",dra:"studio",val:"brand",done:"journey"}
+  },
+  creative:{
+    tag:"creative production", who:"designer",
+    msg:'Produce the <b>hero banner</b> for the fall launch — on-brand, <b>3 sizes, by EOD</b>.',
+    nodes:{req:"request",orch:["production lead","is it ready to ship?"],
+      res:["generate","image model"],dra:["compose","layout tool"],
+      val:["brand review","review tool"],resp:"deliver"},
+    ag:{orch:"orchestrator",res:"image",dra:"layout",val:"review",done:"delivery"}
+  }
+};
+const ROLECLS={system:"system",orch:"orch",res:"research",dra:"draft",val:"valid",done:"done"};
+
+const S={scene:'campaign',mode:'boss',running:false};
+const $=id=>document.getElementById(id);
+const C=()=>SC[S.scene];
+
+/* ------- label painting (unchanged from the original UI) ------- */
+function paintLabels(){
+  const c=C();
+  $('reqWho').textContent=c.who; $('reqMsg').innerHTML=c.msg; $('caseTag').textContent=c.tag;
+  $('lbl_req1').textContent=c.nodes.req;
+  $('lbl_orch1').textContent=c.nodes.orch[0]; $('lbl_orch2').textContent=c.nodes.orch[1];
+  $('lbl_res1').textContent=c.nodes.res[0];  $('lbl_res2').textContent=c.nodes.res[1];
+  $('lbl_dra1').textContent=c.nodes.dra[0];  $('lbl_dra2').textContent=c.nodes.dra[1];
+  $('lbl_val1').textContent=c.nodes.val[0];  $('lbl_val2').textContent=c.nodes.val[1];
+  $('lbl_resp1').textContent=c.nodes.resp;
+  ['res','dra','val'].forEach(id=>{ const e=$('lbl_'+id+'2'); if(e) e.removeAttribute('fill'); });
+}
+
+function setScenario(k){ if(S.running)return; S.scene=k;
+  $('sCamp').classList.toggle('on',k==='campaign'); $('sCrea').classList.toggle('on',k==='creative');
+  paintLabels(); resetAll(); }
+
+function setMode(m){ if(S.running)return; S.mode=m;
+  $('mBoss').classList.toggle('on',m==='boss'); $('mMesh').classList.toggle('on',m==='mesh');
+  $('hint').textContent = m==='boss' ? 'boss coordinates all three specialists' : 'specialists can also hand off peer-to-peer';
+  resetAll(); }
+
+/* ------- graph paint primitives ------- */
+function node(id){return $('n_'+id);}
+function link(id){return $('l_'+id)||$('m_'+id);}
+
+function setNode(id,state){ const n=node(id); if(!n)return;
+  n.classList.remove('active','done','off','flag');
+  if(state && state!=='idle') n.classList.add(state); }
+
+function setLink(id,state){ const l=link(id); if(!l)return;
+  l.classList.remove('flow','reroute','dead');
+  if(state && state!=='off') l.classList.add(state); }
+
+function addLog(role,text,cls){
+  const c=C(); const label = role==='system' ? 'system' : (c.ag[role]||role);
+  const e=$('log'); if(e.querySelector('.empty'))e.innerHTML='';
+  const d=document.createElement('div'); d.className='ln'+(cls?' '+cls:'');
+  d.innerHTML='<span class="ag '+(ROLECLS[role]||'system')+'">'+label
+             +'</span><span class="tx">'+text+'</span>';
+  e.appendChild(d); e.scrollTop=e.scrollHeight;
+}
+
+function setStatus(text,cls){ const s=$('status'); s.className='status'+(cls?' '+cls:''); $('statusText').textContent=text; }
+
+/* ------- view switching: run/kill topology  <->  finale plan graph ------- */
+function showPlanView(){
+  document.querySelector('.stage').classList.add('planning');
+  $('reqCard').style.display='none';
+  $('topoSvg').style.display='none'; $('planGraph').style.display='';
+  $('log').style.display='none';     $('genPanel').style.display='';
+  $('leftHead').textContent='Plan graph'; $('rightHead').textContent='Generated by claude';
+}
+function showNormalView(){
+  document.querySelector('.stage').classList.remove('planning');
+  $('reqCard').style.display='';
+  $('planGraph').style.display='none'; $('topoSvg').style.display='';
+  $('genPanel').style.display='none';  $('log').style.display='';
+  $('planGraph').innerHTML=''; $('genOut').textContent=''; $('genCap').textContent='';
+  BB={}; BBSEEN=[]; if($('bbPanel')){ $('bbPanel').style.display='none'; $('bbPanel').innerHTML=''; }
+  BBEL='bbPanel'; EG.badge={}; CASEBADGES=false;
+  if($('caseTabs'))$('caseTabs').style.display='none';
+  if($('caseBB')){ $('caseBB').style.display='none'; $('caseBB').innerHTML=''; }
+  if($('ctLog'))$('ctLog').classList.add('on'); if($('ctBB'))$('ctBB').classList.remove('on');
+  $('genOut').style.display=''; if($('tabBB'))$('tabBB').classList.remove('on');
+  if($('tabJson'))$('tabJson').classList.add('on'); if($('tabCode'))$('tabCode').classList.remove('on');
+  $('leftHead').textContent='Topology'; $('rightHead').textContent='Case log';
+}
+
+/* ------- local reset (visual only; also tells the backend to drop the case) ------- */
+function resetAll(){
+  S.running=false;
+  EG.active=false;
+  ['req','orch','res','dra','val','resp'].forEach(id=>setNode(id,null));
+  paintLabels();
+  document.querySelectorAll('.lk').forEach(l=>l.classList.remove('flow','reroute','dead'));
+  $('log').innerHTML='<div class="empty">Press <b>Run case</b> to work the request. Kill the orchestrator mid-case to see what the topology does.</div>';
+  showNormalView();
+  $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('resetBtn').disabled=false;
+  $('planBtn').disabled=!wsReady(); $('execBtn').disabled=!wsReady();
+  setStatus(wsReady()?'system healthy':'connecting…', wsReady()?null:'offline');
+}
+
+/* ------- terminal: any status event ends the case ------- */
+function endCase(){ S.running=false; $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('planBtn').disabled=!wsReady(); $('execBtn').disabled=!wsReady(); }
+
+/* ---------------------------------------------------------------------------
+ * WEBSOCKET — the data source. Every backend event maps 1:1 to a paint call.
+ * ------------------------------------------------------------------------- */
+let ws=null, wsOpen=false;
+function wsReady(){ return wsOpen; }
+
+function connect(){
+  const proto = location.protocol==='https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto+'://'+location.host+'/ws');
+  ws.onopen = ()=>{ wsOpen=true; if(!S.running){ $('runBtn').disabled=false; $('planBtn').disabled=false; $('execBtn').disabled=false; setStatus('system healthy',null); } };
+  ws.onclose= ()=>{ wsOpen=false; S.running=false; $('runBtn').disabled=true; $('killBtn').disabled=true;
+                    $('planBtn').disabled=true; $('execBtn').disabled=true; setStatus('backend offline','offline'); setTimeout(connect,1200); };
+  ws.onmessage = ev=>{
+    const m=JSON.parse(ev.data);
+    switch(m.type){
+      case 'node':   if(EG.active){ EG.setNode(m.id,m.state); break; }
+                     setNode(m.id,m.state);
+                     if(m.label!==undefined){ const e1=$('lbl_'+m.id+'1'); if(e1) e1.textContent=m.label; }
+                     if(m.sub!==undefined){   const e2=$('lbl_'+m.id+'2'); if(e2) e2.textContent=m.sub; }
+                     if(m.id==='orch' && m.state==='off') $('killBtn').disabled=true;
+                     if(m.id==='orch' && m.state==='off') $('lbl_orch2').textContent='offline';
+                     updateCaseBadges();
+                     break;
+      case 'link':   if(m.from!==undefined){ if(EG.active) EG.setLink(m.from,m.to,m.state); break; }
+                     setLink(m.id,m.state); break;
+      case 'log':    addLog(m.role,m.text,m.cls); break;
+      case 'status': setStatus(m.text,m.cls); endCase(); break;
+      case 'bb':     bbUpdate(m.key,m.value); break;
+      case 'graph':  renderExecGraph(m); break;
+      case 'plan':   renderPlan(m); break;
+    }
+  };
+}
+
+/* ------- controls -> commands ------- */
+function send(obj){ if(wsReady()) ws.send(JSON.stringify(obj)); }
+
+function runCase(){
+  if(!wsReady()) return;
+  resetAll();
+  S.running=true;
+  BB={}; BBSEEN=[]; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=true;
+  $('caseBB').innerHTML=''; $('caseTabs').style.display=''; showCaseTab('log');
+  $('runBtn').disabled=true; $('killBtn').disabled=false; setStatus('working the case…',null);
+  send({cmd:'run', scenario:S.scene, mode: S.mode==='boss'?'orchestrator':'mesh'});
+}
+
+function killOrch(){
+  if(!S.running) return;
+  $('killBtn').disabled=true;
+  send({cmd:'kill'});
+}
+
+function composePlan(){
+  if(!wsReady()) return;
+  const goal=$('goalInput').value.trim();
+  if(!goal){ $('goalInput').focus(); return; }
+  resetAll(); S.running=true;
+  showPlanView();
+  $('planGraph').innerHTML='<div class="thinking">orchestrator is composing a plan for<br><b>'+esc(goal)+'</b> …</div>';
+  $('genOut').textContent=''; $('genCap').textContent='waiting for claude…';
+  $('runBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true;
+  setStatus('composing a plan…',null);
+  send({cmd:'plan', scenario:S.scene, goal});
+}
+
+/* ---------------------------------------------------------------------------
+ * FINALE — build a fresh DAG from the model's plan (steps + depends_on),
+ * layered by dependency depth, revealed in topological order. Then show the
+ * two artifacts the model produced: the emit_plan JSON and a derived script.
+ * ------------------------------------------------------------------------- */
+const SVGNS='http://www.w3.org/2000/svg';
+function esc(s){ return (s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+let GEN={json:'',code:''};
+function showGen(which){
+  $('tabJson').classList.toggle('on',which==='json');
+  $('tabCode').classList.toggle('on',which==='code');
+  $('genOut').innerHTML = which==='code' ? pyHi(GEN.code) : jsonHi(GEN.json);
+  $('genOut').scrollTop=0;
+}
+
+/* tiny, escaping highlighters (input is our own generated text) */
+const _E={'&':'&amp;','<':'&lt;','>':'&gt;'};
+function _esc(s){ let o=''; for(const c of s) o+=(_E[c]||c); return o; }
+const _PYKW=new Set(['async','def','await','import','from','return','raise','for','if','else','elif',
+  'in','not','and','or','None','True','False','with','as','lambda','while','class','try','except',
+  'finally','yield','pass','continue','break','is','del','global']);
+const _PYB=new Set(['asyncio','board','PLAN','gather','create_task','run','launch','NotImplementedError']);
+function pyHi(src){
+  let out='', i=0, n=src.length, lastSig='';
+  const push=(cls,t)=>{ out += cls ? '<span class="'+cls+'">'+_esc(t)+'</span>' : _esc(t); };
+  while(i<n){
+    const c=src[i];
+    if(src.startsWith('"""',i)||src.startsWith("'''",i)){
+      const q=src.substr(i,3); let j=src.indexOf(q,i+3); j=(j<0?n:j+3);
+      push('s',src.slice(i,j)); i=j; continue;
+    }
+    if(c==='#'){ let j=src.indexOf('\n',i); j=(j<0?n:j); push('c',src.slice(i,j)); i=j; continue; }
+    if(c==="'"||c==='"'){ let j=i+1; while(j<n&&src[j]!==c){ if(src[j]==='\\')j++; j++; } j=Math.min(j+1,n);
+      push('s',src.slice(i,j)); i=j; continue; }
+    if(/[0-9]/.test(c) && !/[A-Za-z0-9_]/.test(src[i-1]||'')){ let j=i; while(j<n&&/[0-9._,]/.test(src[j]))j++;
+      push('n',src.slice(i,j)); i=j; continue; }
+    if(/[A-Za-z_]/.test(c)){ let j=i; while(j<n&&/[A-Za-z0-9_]/.test(src[j]))j++; const w=src.slice(i,j);
+      let cls = lastSig==='def' ? 'fn' : (_PYKW.has(w)?'k':(_PYB.has(w)?'b':''));
+      push(cls,w); lastSig=w; i=j; continue; }
+    if(!/\s/.test(c)) lastSig='';
+    push('',c); i++;
+  }
+  return out;
+}
+function jsonHi(src){
+  let e=_esc(src);   // escapes & < > ; quotes stay literal
+  e=e.replace(/("(?:\\.|[^"\\])*")(\s*:)?/g,
+    (m,str,colon)=> colon ? '<span class="jk">'+str+'</span>'+colon : '<span class="s">'+str+'</span>');
+  e=e.replace(/\b(true|false|null)\b/g,'<span class="k">$1</span>');
+  return e;
+}
+
+/* ---------------------------------------------------------------------------
+ * layoutDAG — the ONE layout engine shared by the compose graph and the exec
+ * graph. Layered top->bottom by dependency depth; barycenter ordering keeps
+ * edge crossings near zero; a centering relaxation pulls each layer under/over
+ * its neighbours so parents sit above their children. Returns absolute node
+ * positions (px,py) + canvas size; the SVG viewBox + preserveAspectRatio then
+ * auto-fit it to the panel.
+ * ------------------------------------------------------------------------- */
+function layoutDAG(steps, root){
+  const RID=root.id, byId={}; steps.forEach(s=>byId[s.id]=s);
+  const layer={}, seen={};
+  function calc(id){ if(layer[id]!=null) return layer[id]; if(seen[id]) return 1; seen[id]=1;
+    const s=byId[id]; if(!s) return 0;
+    if(!s.depends_on.length) return layer[id]=1;
+    let mx=0; s.depends_on.forEach(d=> mx=Math.max(mx, calc(d))); return layer[id]=mx+1; }
+  steps.forEach(s=>calc(s.id));
+  const nodes=[{id:RID,title:root.title,sub:root.sub,layer:0,root:true,deps:[]}]
+    .concat(steps.map(s=>({id:s.id,title:s.title,sub:s.sub,custom:s.custom,step:s,
+      layer:layer[s.id]||1, deps:s.depends_on.length?s.depends_on.slice():[RID]})));
+  const nById={}; nodes.forEach(n=>nById[n.id]=n);
+  const kids={}; nodes.forEach(n=>n.deps.forEach(d=>(kids[d]=kids[d]||[]).push(n.id)));
+  const hasKids={}; Object.keys(kids).forEach(k=>hasKids[k]=1);
+  nodes.forEach(n=>{ if(!n.root && !hasKids[n.id]) n.term=true; });
+  const layers={}; nodes.forEach(n=>(layers[n.layer]=layers[n.layer]||[]).push(n));
+  const L=Math.max.apply(null,nodes.map(n=>n.layer));
+  for(let l=0;l<=L;l++)(layers[l]||[]).forEach((n,i)=>n.order=i);
+  const meanO=ids=> ids.length? ids.reduce((a,id)=>a+nById[id].order,0)/ids.length : null;
+  for(let it=0;it<6;it++){
+    for(let l=1;l<=L;l++){ const a=layers[l]||[]; a.forEach(n=>{const b=meanO(n.deps); n._b=b==null?n.order:b;}); a.sort((x,y)=>x._b-y._b||x.order-y.order); a.forEach((n,i)=>n.order=i); }
+    for(let l=L-1;l>=0;l--){ const a=layers[l]||[]; a.forEach(n=>{const b=meanO(kids[n.id]||[]); n._b=b==null?n.order:b;}); a.sort((x,y)=>x._b-y._b||x.order-y.order); a.forEach((n,i)=>n.order=i); }
+  }
+  const NW=168,NH=48,CG=26,RG=36,MX=16,MY=14,STEP=NW+CG;
+  for(let l=0;l<=L;l++)(layers[l]||[]).slice().sort((a,b)=>a.order-b.order).forEach((n,i)=>n.x=i*STEP);
+  const meanX=ids=> ids.length? ids.reduce((a,id)=>a+nById[id].x,0)/ids.length : null;
+  function place(l,want){ const a=(layers[l]||[]).slice().sort((x,y)=>x.order-y.order);
+    a.forEach(n=>{const d=want(n); n._d=d==null?n.x:d;});
+    let prev=-1e9; a.forEach(n=>{n.x=Math.max(n._d,prev+STEP);prev=n.x;});
+    let sh=0; a.forEach(n=>sh+=(n._d-n.x)); sh/=a.length||1; a.forEach(n=>n.x+=sh); }
+  for(let it=0;it<10;it++){ for(let l=L;l>=0;l--)place(l,n=>meanX(kids[n.id]||[])); for(let l=0;l<=L;l++)place(l,n=>meanX(n.deps||[])); }
+  let minX=1e9,maxX=-1e9; nodes.forEach(n=>{minX=Math.min(minX,n.x);maxX=Math.max(maxX,n.x+NW);});
+  const pos={}; nodes.forEach(n=>{ n.px=MX+(n.x-minX); n.py=MY+n.layer*(NH+RG); pos[n.id]=n; });
+  return {nodes,pos,byId:nById,kids,W:MX*2+(maxX-minX),H:MY*2+L*(NH+RG)+NH,NW,NH,rootId:RID};
+}
+function arrowDefs(){ const d=document.createElementNS(SVGNS,'defs');
+  d.innerHTML='<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>'; return d; }
+function edgePath(a,b,NW,NH){ const x1=a.px+NW/2,y1=a.py+NH,x2=b.px+NW/2,y2=b.py,my=(y1+y2)/2;
+  const p=document.createElementNS(SVGNS,'path'); p.setAttribute('d','M'+x1+','+y1+' C'+x1+','+my+' '+x2+','+my+' '+x2+','+y2); return p; }
+function nodeGroup(n,NW,NH,exec){
+  const human = !!(n.step && n.step.human);
+  const grp=document.createElementNS(SVGNS,'g');
+  grp.setAttribute('class', exec ? ('pnode exec '+(human?'human':'idle')+(n.root?' coord':''))
+                                  : ('pnode'+(n.root?' goal':human?' human':n.custom?' custom':n.term?' term':'')));
+  const r=document.createElementNS(SVGNS,'rect');
+  r.setAttribute('x',n.px); r.setAttribute('y',n.py); r.setAttribute('width',NW); r.setAttribute('height',NH); r.setAttribute('rx',9);
+  grp.appendChild(r);
+  const tx = human ? n.px+36 : n.px+12;   // clear the person glyph
+  const t1=document.createElementNS(SVGNS,'text'); t1.setAttribute('class','pt1');
+  t1.setAttribute('x',tx); t1.setAttribute('y',n.py+(n.sub!=null?20:29)); t1.textContent=clip(n.title,human?18:22); grp.appendChild(t1);
+  const t2=document.createElementNS(SVGNS,'text'); t2.setAttribute('class','pt2');
+  t2.setAttribute('x',tx); t2.setAttribute('y',n.py+37); grp.appendChild(t2); grp._t2=t2;
+  if(n.sub!=null) t2.textContent=clip(n.sub||'',human?24:26);
+  if(human){   // little person silhouette: head + shoulders
+    const cx=n.px+19, cy=n.py+NH/2;
+    const head=document.createElementNS(SVGNS,'circle'); head.setAttribute('class','hicon');
+    head.setAttribute('cx',cx); head.setAttribute('cy',cy-6); head.setAttribute('r',4.4); grp.appendChild(head);
+    const body=document.createElementNS(SVGNS,'path'); body.setAttribute('class','hicon');
+    body.setAttribute('d','M'+(cx-7)+','+(cy+9)+' a7,7 0 0 1 14,0 z'); grp.appendChild(body);
+  }
+  return grp;
+}
+// append a synthetic human-approval gate that every terminal step feeds into —
+// the backend never "runs" it, so it sits as the pending human sign-off.
+function withHuman(steps){
+  const dep=new Set(); steps.forEach(s=> s.depends_on.forEach(d=>dep.add(d)));
+  const terms=steps.filter(s=> !dep.has(s.id)).map(s=>s.id);
+  return steps.concat([{id:'__human__', title:'Human review', sub:'you approve before ship',
+                        depends_on:terms, human:true}]);
+}
+
+function renderPlan(m){
+  GEN={json:m.json||'', code:m.code||''}; showGen('json');
+  $('genCap').textContent = (m.source==='live'?'composed live':'recorded fallback') + ' · '+m.steps.length+' steps';
+  const steps=withHuman(m.steps);
+  const g=layoutDAG(steps, {id:'__goal__', title:'goal', sub:clip(m.goal,30)});
+  const svg=document.createElementNS(SVGNS,'svg'); svg.setAttribute('viewBox','0 0 '+g.W+' '+g.H); svg.appendChild(arrowDefs());
+  const edgeByTarget={};
+  g.nodes.forEach(n=> n.deps.forEach(d=>{ const a=g.pos[d]; if(!a) return;
+    const p=edgePath(a,n,g.NW,g.NH); p.setAttribute('class','pedge'+(n.custom?' cust':'')); p.setAttribute('marker-end','url(#ah)');
+    svg.appendChild(p); (edgeByTarget[n.id]=edgeByTarget[n.id]||[]).push(p); }));
+  const gEl={};
+  g.nodes.forEach(n=>{ const grp=nodeGroup(n,g.NW,g.NH,false); svg.appendChild(grp); gEl[n.id]=grp; });
+  const pg=$('planGraph'); pg.innerHTML=''; pg.appendChild(svg);
+  gEl['__goal__'].classList.add('on');
+  steps.forEach((s,i)=> setTimeout(()=>{ if(gEl[s.id])gEl[s.id].classList.add('on'); (edgeByTarget[s.id]||[]).forEach(p=>p.classList.add('on')); }, 200+i*160));
+  setTimeout(()=>{ setStatus(m.source==='live'?'plan ready — composed live':'plan ready — recorded fallback', m.source==='live'?'recovered':''); endCase(); }, 200+steps.length*160+150);
+}
+function clip(s,n){ s=s||''; return s.length>n ? s.slice(0,n-1)+'…' : s; }
+
+/* ---------------------------------------------------------------------------
+ * OPTION C — execute the model's composed plan under a topology, live, on the
+ * model's own DAG. Builds an executable graph from the `graph` event, then
+ * animates node/link events onto it. The coordinator node is the kill target;
+ * clicking any step node kills that worker (the failure gallery).
+ * ------------------------------------------------------------------------- */
+const EG={active:false, nodes:{}, edges:{}, pos:{}, svg:null, terminals:[], badge:{}, lastKey:null};
+
+function executePlan(){
+  if(!wsReady()) return;
+  const goal=$('goalInput').value.trim();
+  if(!goal){ $('goalInput').focus(); return; }
+  resetAll(); S.running=true;
+  showPlanView();
+  $('leftHead').textContent=(S.mode==='boss'?'Orchestrator':'Mesh')+' execution';
+  $('planGraph').innerHTML='<div class="thinking">composing a plan for<br><b>'+esc(goal)+'</b> …</div>';
+  $('genOut').textContent=''; $('genCap').textContent='waiting for claude…';
+  $('runBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true; $('execBtn').disabled=true;
+  setStatus('composing a plan…',null);
+  send({cmd:'execute', scenario:S.scene, goal, mode:S.mode==='boss'?'orchestrator':'mesh'});
+}
+
+function egKey(a,b){ return a+'>'+b; }
+function egMakeEdge(fromId,toId,extraCls){
+  const key=egKey(fromId,toId);
+  if(EG.edges[key]) return EG.edges[key];
+  const a=EG.pos[fromId], b=EG.pos[toId]; if(!a||!b) return null;
+  const sx=a.x+a.w/2, sy=a.y+a.h, tx=b.x+b.w/2, ty=b.y, my=(sy+ty)/2;
+  const p=document.createElementNS(SVGNS,'path');
+  p.setAttribute('d',`M${sx},${sy} C${sx},${my} ${tx},${my} ${tx},${ty}`);
+  p.setAttribute('class','eedge'+(extraCls?' '+extraCls:''));
+  if(extraCls!=='redundant') p.setAttribute('marker-end','url(#ah)');
+  EG.svg.insertBefore(p, EG.svg.firstChild);   // edges behind nodes
+  EG.edges[key]=p; return p;
+}
+
+EG.setNode=function(id,state){
+  const g=EG.nodes[id]; if(!g) return;
+  g.classList.remove('active','done','off','flag','idle');
+  g.classList.add(state||'idle');
+  if(id==='coord' && state==='off') $('killBtn').disabled=true;
+  if(EG.badge && EG.badge[id]) egApplyBadge(id);
+};
+EG.setLink=function(from,to,state){
+  const key=egKey(from,to);
+  if(state && state!=='off'){
+    const p=EG.edges[key] || egMakeEdge(from,to, from==='coord'?'drive':'');
+    if(!p) return;
+    p.classList.remove('flow','reroute','dead'); p.classList.add(state);
+  } else {
+    const p=EG.edges[key]; if(!p) return;
+    if(from==='coord'){ p.remove(); delete EG.edges[key]; }   // ephemeral: the coordinator's drive edge vanishes once the step is done — the dependency edges carry the structure
+    else { p.classList.remove('flow','reroute','dead'); }     // dependency edges persist
+  }
+};
+
+function renderExecGraph(m){
+  EG.active=true; EG.nodes={}; EG.edges={}; EG.pos={}; EG.terminals=m.terminals||[];
+  GEN={json:m.json||'', code:m.code||''}; BB={}; BBSEEN=[]; EG.badge={}; EG.lastKey=null; EG._flipped=false; BBEL='bbPanel';
+  showTab('json');   // the beat: show the code the model just wrote; flips to blackboard on first write
+  $('genCap').textContent=(m.source==='live'?'composed live':'recorded fallback')+' · '+m.steps.length+' steps';
+  const steps=withHuman(m.steps);
+  const g=layoutDAG(steps, {id:'coord',
+     title:(m.mode==='orchestrator'?'orchestrator':'coordinator'),
+     sub:(m.mode==='orchestrator'?'drives the plan':'redundant · watches')});
+  g.nodes.forEach(n=> EG.pos[n.id]={x:n.px,y:n.py,w:g.NW,h:g.NH,n});
+  const svg=document.createElementNS(SVGNS,'svg'); svg.setAttribute('viewBox','0 0 '+g.W+' '+g.H); EG.svg=svg; svg.appendChild(arrowDefs());
+  steps.forEach(s=> s.depends_on.forEach(d=> egMakeEdge(d, s.id)) );
+  if(m.mode!=='orchestrator') EG.terminals.forEach(t=> egMakeEdge('coord', t, 'redundant'));
+  g.nodes.forEach(n=>{
+    const grp=nodeGroup(n,g.NW,g.NH,true);
+    if(!n.root && !(n.step&&n.step.human)){ const st=n.step; EG.badge[n.id]={el:grp._t2, dep:(st.dep_keys||[]), out:st.out_key||n.id};
+      if(m.mode!=='orchestrator'){   // killing one worker only tells a story in the mesh
+        grp.style.cursor='pointer';
+        const ttl=document.createElementNS(SVGNS,'title'); ttl.textContent='click to kill this step'; grp.appendChild(ttl);
+        grp.addEventListener('click',()=>{ if(S.running) send({cmd:'kill', target:n.id}); }); } }
+    svg.appendChild(grp); EG.nodes[n.id]=grp;
+  });
+  const pg=$('planGraph'); pg.innerHTML=''; pg.appendChild(svg);
+  // motion: pop nodes in (staggered by topo order), draw each edge on after its target lands
+  const order=g.nodes;
+  order.forEach((n,i)=> setTimeout(()=>{ const el=EG.nodes[n.id]; if(el) el.classList.add('shown'); }, 70+i*85));
+  Object.keys(EG.edges).forEach(key=>{ const p=EG.edges[key]; const to=key.split('>')[1];
+    const ti=order.findIndex(n=>n.id===to); const delay=70+(ti<0?0:ti)*85+70;
+    let len; try{ len=p.getTotalLength(); }catch(e){ return; }
+    p.style.strokeDasharray=len; p.style.strokeDashoffset=len;
+    setTimeout(()=>{ p.style.transition='stroke-dashoffset .45s ease'; p.style.strokeDashoffset=0;
+      setTimeout(()=>{ p.style.strokeDasharray=''; p.style.strokeDashoffset=''; p.style.transition=''; }, 520); }, delay);
+  });
+  egUpdateBadges(); $('killBtn').disabled=false; setStatus('executing the plan…',null);
+}
+
+/* ---- side blackboard: live shared state + awaiting badges ---- */
+var BB={}, BBSEEN=[], BBEL='bbPanel', CASEBADGES=false;
+function showCaseTab(which){
+  const bb = which==='bb';
+  $('ctLog').classList.toggle('on', !bb);
+  $('ctBB').classList.toggle('on', bb);
+  $('log').style.display = bb ? 'none' : '';
+  $('caseBB').style.display = bb ? '' : 'none';
+  $('rightHead').textContent = bb ? 'Blackboard' : 'Case log';
+  if(bb) renderBB();
+}
+/* run-case node badges: sublabel toggles service-name <-> awaiting/working, off shared state */
+function caseBadge(id){
+  const M={res:['request'],dra:['research'],val:['draft']};
+  const m=M[id]; if(!m) return null;
+  const dep=m[0];
+  const node=$('n_'+id); const cls=node?node.getAttribute('class'):'';
+  if(/(^|\s)done(\s|$)/.test(cls)) return null;          // finished -> service name (greens via CSS)
+  if(!(dep in BB)) return {t:'awaiting: '+dep, c:'var(--dead)'};  // blocked on shared state -> red
+  if(/(^|\s)active(\s|$)/.test(cls)) return {t:'working\u2026', c:'var(--work)'};  // running -> amber
+  return null;                                            // dep met, not yet running -> service name
+}
+function applyCaseBadge(id){
+  const el=$('lbl_'+id+'2'); if(!el) return;
+  const b = (CASEBADGES && !EG.active) ? caseBadge(id) : null;
+  if(b){ el.textContent=clip(b.t,24); el.setAttribute('fill', b.c); }
+  else { el.textContent = C().nodes[id][1]; el.removeAttribute('fill'); }
+}
+function updateCaseBadges(){ if(EG.active) return; ['res','dra','val'].forEach(applyCaseBadge); }
+function showTab(which){
+  if(which==='bb'){
+    $('tabBB').classList.add('on'); $('tabJson').classList.remove('on'); $('tabCode').classList.remove('on');
+    $('genOut').style.display='none'; $('bbPanel').style.display=''; renderBB();
+  } else {
+    $('tabBB').classList.remove('on'); $('bbPanel').style.display='none'; $('genOut').style.display='';
+    showGen(which);
+  }
+}
+function bbFmt(v){
+  if(v===null||v===undefined) return '<span class="bbpn">null</span>';
+  if(typeof v==='string') return '<span class="bbstr">"'+esc(v)+'"</span>';
+  if(typeof v==='number'||typeof v==='boolean') return '<span class="bbnum">'+v+'</span>';
+  if(Array.isArray(v)) return '<span class="bbpn">[</span>'+v.map(bbFmt).join('<span class="bbpn">, </span>')+'<span class="bbpn">]</span>';
+  var parts=Object.keys(v).map(function(k){return '<span class="bbkey">"'+esc(k)+'"</span><span class="bbpn">: </span>'+bbFmt(v[k]);});
+  return '<span class="bbpn">{ </span>'+parts.join('<span class="bbpn">, </span>')+'<span class="bbpn"> }</span>';
+}
+function renderBB(){
+  var el=$(BBEL); if(!el) return;
+  if(!BBSEEN.length){ el.innerHTML='<div style="color:var(--dim);padding:6px 2px">{ }  \u2014 empty until the request lands</div>'; return; }
+  var h='<span class="bbpn">{</span>';
+  BBSEEN.forEach(function(k,i){
+    var hot = k===EG.lastKey ? ' bbnew' : '';
+    h+='<div class="bbrow'+hot+'">&nbsp;&nbsp;<span class="bbkey">"'+esc(k)+'"</span><span class="bbpn">: </span>'+bbFmt(BB[k])+(i<BBSEEN.length-1?'<span class="bbpn">,</span>':'')+'</div>';
+  });
+  h+='<span class="bbpn">}</span>'; el.innerHTML=h;
+}
+function bbUpdate(key,value){
+  if(!(key in BB)) BBSEEN.push(key);
+  BB[key]=value; EG.lastKey=key;
+  if(EG.active && !EG._flipped){ EG._flipped=true; showTab('bb'); }  // beat over → flip to the live blackboard
+  renderBB(); egUpdateBadges(); updateCaseBadges();
+  setTimeout(function(){ if(EG.lastKey===key){ EG.lastKey=null; renderBB(); } }, 750);
+}
+function egBadge(id){
+  var b=EG.badge[id]; if(!b) return null;
+  var cls=EG.nodes[id].getAttribute('class')||'';
+  if(cls.indexOf('done')>=0) return {t:'wrote '+b.out, c:'var(--live)'};
+  if(cls.indexOf('off')>=0)  return {t:'killed', c:'var(--dead)'};
+  if(cls.indexOf('flag')>=0) return {t:'needs a human', c:'var(--warm)'};
+  var unmet=b.dep.filter(function(k){return !(k in BB);});
+  if(unmet.length) return {t:'awaiting: '+unmet.join(', '), c:'var(--dead)'};
+  if(cls.indexOf('active')>=0) return {t:'running\u2026', c:'var(--work)'};
+  return {t:'ready', c:'var(--live)'};
+}
+function egApplyBadge(id){
+  var b=EG.badge[id]; if(!b) return; var r=egBadge(id); if(!r) return;
+  b.el.textContent=clip(r.t,28); b.el.setAttribute('fill', r.c);
+}
+function egUpdateBadges(){ if(EG.badge) Object.keys(EG.badge).forEach(egApplyBadge); }
+
+/* ---------------------------------------------------------------------------
+ * PRESENTATION MODE — bigger type + full-width layout for the projector.
+ * Toggle with the "P" key, the header button, or ?present=1. Remembered per
+ * browser so a reload during the talk stays big. No effect on demo behaviour.
+ * ------------------------------------------------------------------------- */
+function setPresent(on){
+  document.body.classList.toggle('present', on);
+  const b=$('presentBtn'); if(b) b.textContent = on ? 'presentation ✓' : 'presentation';
+  try{ localStorage.setItem('present', on?'1':'0'); }catch(e){}
+}
+function togglePresent(){ setPresent(!document.body.classList.contains('present')); }
+(function(){
+  let on = new URLSearchParams(location.search).get('present')==='1';
+  try{ if(!on && localStorage.getItem('present')==='1') on=true; }catch(e){}
+  if(on) setPresent(true);
+})();
+/* ---------------------------------------------------------------------------
+ * THEME — dark (default) vs light. Light reads far better on a projector in a
+ * lit room; dark washes out to gray there. Toggle with the "T" key, the header
+ * button, or ?theme=light. Remembered per browser. No effect on demo behaviour.
+ * ------------------------------------------------------------------------- */
+function setTheme(name){
+  const light = name==='light';
+  document.body.classList.toggle('light', light);
+  const b=$('themeBtn'); if(b) b.textContent = light ? 'light theme' : 'dark theme';
+  try{ localStorage.setItem('theme', light?'light':'dark'); }catch(e){}
+}
+function toggleTheme(){ setTheme(document.body.classList.contains('light')?'dark':'light'); }
+(function(){
+  let t = new URLSearchParams(location.search).get('theme');
+  if(t!=='light' && t!=='dark'){ try{ t=localStorage.getItem('theme'); }catch(e){} }
+  if(t==='light') setTheme('light');
+})();
+
+document.addEventListener('keydown', e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey) return;                 // leave browser shortcuts alone
+  const t=e.target; if(t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA')) return;  // don't hijack typing
+  if(e.key==='p'||e.key==='P') togglePresent();
+  else if(e.key==='t'||e.key==='T') toggleTheme();
+});
+
+paintLabels();
+connect();
+</script>
+</body>
+</html>
