@@ -17,6 +17,57 @@ Everything the agents "produce" is fake — tiny hardcoded dicts/strings on the
 blackboard. No model calls, no external services. Fully offline. The point is
 topology resilience, not output.
 
+## How it works
+
+![Kill the orchestrator — orchestrator mode stalls, mesh mode recovers](docs/how-it-works.svg)
+
+The same four handlers — research, draft, validation, activate — run in **both**
+modes. The only thing that changes is *how they're invoked*. That single
+difference is why one mode dies when you kill the boss and the other doesn't.
+
+```mermaid
+flowchart LR
+  subgraph ORCH["Orchestrator mode — boss killed ❌ STALLS"]
+    direction TB
+    O["orchestrator — offline"]:::dead
+    O -. "✂" .-x R1["research"]:::idle
+    R1 --> D1["draft"]:::idle --> V1["validation"]:::idle --> A1["activate — never reached"]:::idle
+  end
+  subgraph MESH["Hybrid mesh — boss killed ✅ RECOVERS"]
+    direction TB
+    BB[["blackboard — shared state"]]:::board
+    R2["research"]:::live --- BB
+    D2["draft"]:::live --- BB
+    V2["validation"]:::live --- BB
+    A2["activate ✓"]:::live --- BB
+    O2["orchestrator — redundant peer, killed"]:::dead -. "✂" .-x A2
+  end
+  classDef dead fill:#241316,stroke:#ff5f5f,color:#ff9a9a;
+  classDef idle fill:#1e2531,stroke:#2b3340,color:#8b94a5;
+  classDef live fill:#16241f,stroke:#33d6a4,color:#eafff6;
+  classDef board fill:#1e2531,stroke:#e8b98f,color:#e8b98f;
+```
+
+1. **The kill is real.** The orchestrator is an actual `asyncio` task; the kill
+   command `cancel()`s it. Nothing about the aftermath is scripted — no
+   `reroute()` that plays canned steps.
+2. **Orchestrator mode** wires the handlers as one linear chain owned by the boss:
+   `research → draft → validation → activate`. Cancel the boss and the chain
+   freezes mid-flight. Nobody owns the remaining steps, so the case **stalls**.
+3. **Hybrid mesh mode** runs each handler as its own task blocked on a shared
+   blackboard, firing when its trigger predicate goes true. The orchestrator is
+   just a *redundant peer* on the final `activate` call. Cancel it and the other
+   watchers — still running — carry the case to done. Recovery **emerges**.
+4. **Why the recovery is honest:** cancelling the orchestrator removes one of two
+   watchers on the final trigger. The activation peer is still watching the same
+   dict, so it fires. The `orch_alive` flag only decides which link the UI
+   animates — it never decides whether a handler runs.
+
+The **finale** goes one step further: type an unseen goal and one real model call
+(forced-tool `emit_plan`) composes a fresh plan, which the backend validates and
+then executes on the model's own dependency graph — with the kill switch still
+live. See [Finale](#finale--the-self-writing-planner-the-one-real-model-call) below.
+
 ## Layout
 
 ```
