@@ -18,7 +18,7 @@ import asyncio
 import json
 import os
 
-MODEL = "claude-opus-4-8"   # was "claude-opus-5" — not a valid API id, so every call errored and fell back to the recorded plan
+MODEL = "claude-opus-5"     # forced-tool composition; any error degrades to the recorded plan
 TIMEOUT_S = 8.0
 
 # Forced tool schema. tool_choice pins the model to exactly this shape.
