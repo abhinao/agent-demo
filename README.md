@@ -68,6 +68,43 @@ The **finale** goes one step further: type an unseen goal and one real model cal
 then executes on the model's own dependency graph — with the kill switch still
 live. See [Finale](#finale--the-self-writing-planner-the-one-real-model-call) below.
 
+## The other demo — the cost of the mesh (poison write)
+
+The kill demo shows the mesh *winning*. This one shows it losing, with no one
+killed. One handler succeeds but writes a plausible, well-shaped, **wrong** result
+to the shared state — it does not crash, it does not raise. The same poison write
+is run against three topologies:
+
+- **Orchestrator** — a validation **gate** at the merge point rejects the bad
+  audience before the irreversible `activate`. Poison caught, nothing fires.
+- **Mesh (unscoped)** — no gatekeeper, and every handler reads the *whole* board,
+  so the poison reaches handlers that never needed it (even the brief-only
+  `assets` / `legal`). Widest blast radius; the external action fires.
+- **Mesh (scoped)** — no gatekeeper either, but least-privilege reads: each
+  handler sees only the keys it declared, so the collateral reads disappear and
+  the blast radius shrinks.
+
+The fault is injected by a **wrapper** around one handler's output — the handlers'
+own logic is never edited, so the "identical handlers in every topology" claim
+still holds. The run prints a per-handler trace (who wrote what, who read it, where
+it stopped or how far it spread) and a blast-radius count. Deterministic, offline,
+no new dependencies.
+
+Same poison write, three topologies:
+
+| topology         | gate? | reads           | handlers hit | external actions |
+| ---------------- | ----- | --------------- | ------------ | ---------------- |
+| orchestrator     | yes   | declared        | 2            | 0 (blocked)      |
+| mesh (unscoped)  | no    | whole board     | 5            | 1                |
+| mesh (scoped)    | no    | least-privilege | 3            | 1                |
+
+The takeaway: the **gate** is what prevents harm; **scoping** limits the spread but
+does not replace validation. You want both. Run it (pure stdlib — no venv, no key):
+
+```bash
+python3 backend/poison_demo.py
+```
+
 ## Layout
 
 ```
@@ -75,6 +112,7 @@ backend/app.py         FastAPI app + /ws websocket endpoint
 backend/agents.py      blackboard + worker handlers + both run modes + kill + plan reveal
 backend/planner.py     the FINALE — one real Anthropic call, forced emit_plan, validation
 backend/scenarios.py   the two scenario configs (log text + tiny fake payloads + catalog)
+backend/poison_demo.py the poison-write / blast-radius demo (standalone CLI, stdlib only)
 frontend/index.html    the existing UI, rewired to consume the ws feed
 ```
 
@@ -120,6 +158,14 @@ Without it, the finale still works and shows the recorded-plan fallback path.
 New client → backend command: `{"cmd":"plan","scenario":"campaign","goal":"<unseen task>"}`.
 
 ## Run
+
+Two demos ship here. The **poison-write** demo is a single command, no setup:
+
+```bash
+python3 backend/poison_demo.py     # blast-radius trace across the three topologies
+```
+
+The **kill-the-coordinator** demo is the web app:
 
 ```bash
 cd backend
