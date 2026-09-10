@@ -53,6 +53,15 @@ SCENARIOS = {
             "validation": "brand+legal: pass",
             "activation": {"journey_id": "JRN-2205", "enrolled": 48210, "state": "live"},
         },
+        # poison-write demo: research returns a plausible, well-shaped, WRONG audience.
+        # `gate` is the content check the orchestrator's merge gate runs (rejects when
+        # the field exceeds max); the mesh has no gate, so it fires `external`.
+        "poison": {
+            "research": {"segment": "all-customers", "count": 2300000, "window_days": 14},
+            "gate": {"field": "count", "max": 500000},
+            "spread_log": "read the poisoned audience",
+            "external": "enroll 2,300,000 profiles into the journey",
+        },
         "log": {
             "start":    "case received — win-back journey · deadline Fri",
             "dispatch": "two jobs: build the audience, build the creative. dispatching.",
@@ -111,6 +120,14 @@ SCENARIOS = {
             "draft": "banner composed · 3 sizes",
             "validation": "review tool: approved",
             "activation": {"delivery_asset": "asset:ship-3140", "sizes": 3, "state": "shipped"},
+        },
+        # poison-write demo: the generator returns a plausible but WRONG batch —
+        # 4,200 auto-approved assets, no human review. The gate checks the batch size.
+        "poison": {
+            "research": {"options": 4, "source": "image model", "batch": 4200, "review": "auto"},
+            "gate": {"field": "batch", "max": 100},
+            "spread_log": "used the poisoned batch",
+            "external": "publish 4,200 auto-approved assets to the CDN",
         },
         "log": {
             "start":    "case received — hero banner · 3 sizes · deadline EOD",

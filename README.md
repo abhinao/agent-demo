@@ -178,11 +178,24 @@ Open http://127.0.0.1:8000 — the frontend connects back to `/ws` automatically
 
 ## Drive the demo
 
-1. Pick **campaign** or **creative**, pick **orchestrator** or **hybrid mesh**.
-2. **Run case**, then **Kill orchestrator** mid-run.
-   - Orchestrator mode → the case freezes and the status bar goes red (*stalled*).
-   - Mesh mode → the surviving handlers hand off peer-to-peer and finish the case
-     without the boss (status goes amber, *recovered*).
+Pick a **scenario** (top-right) and a **mode** (orchestrator / hybrid mesh), then
+inject a fault — the *same fault* produces opposite outcomes per topology:
+
+| | **Kill** the coordinator | **Poison** write |
+| --- | --- | --- |
+| **Orchestrator** | stalls | caught at the merge gate |
+| **Mesh** | recovers | spreads (blast radius) |
+
+- **Run case**, then **Kill** mid-run — orchestrator freezes (*stalled*, red); mesh
+  hands off peer-to-peer and finishes without the boss (*recovered*, amber).
+- **Poison** — one handler returns a plausible, wrong result. Orchestrator's merge
+  gate rejects it (0 external actions); mesh has no gate, so it spreads to every
+  handler that reads the key and the external action fires (logged, not executed).
+- **Compose a plan…** reveals the finale — type an unseen goal and watch it compose
+  and run (see below).
+
+The poison button is the web version of `backend/poison_demo.py`; the CLI adds the
+third (scoped-mesh) topology and the full blast-radius trace.
 
 ## Event protocol (backend → frontend)
 

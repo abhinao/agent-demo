@@ -255,6 +255,66 @@ async def run_case(s):
 
 
 # ---------------------------------------------------------------------------
+# POISON WRITE — the contrasting demo. research returns a plausible, WRONG
+# result (injected from scenario config; the do_* handlers are never touched).
+# Orchestrator has a merge gate that rejects it; the mesh has none, so it
+# reaches the irreversible step. See backend/poison_demo.py for the CLI trace
+# and the third (scoped-mesh) variant. Nodes it touches go amber ("flag").
+# ---------------------------------------------------------------------------
+
+def _short(v):
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{k}: {v[k]}" for k in list(v)[:2]) + ", …}"
+    return str(v)
+
+async def run_poison(s):
+    try:
+        pois = s.cfg["poison"]
+        bad, gate = pois["research"], pois["gate"]
+        await s.log("system", "case received — one handler will return a plausible, wrong result.", "warn")
+        await asyncio.sleep(0.4)
+        await s.node("req", "done"); await s.link("req_orch", "flow"); await asyncio.sleep(0.4); await s.link("req_orch", "off")
+        await s.node("orch", "active"); await s.log("orch", s.g["dispatch"]); await asyncio.sleep(0.5); await s.node("orch", "done")
+        await s.bb_set("request", s.cfg["request"])
+
+        # research writes the POISON (config-injected — the handler itself is untouched)
+        await s.node("res", "flag"); await s.link("orch_res", "flow"); await asyncio.sleep(STEP); await s.link("orch_res", "off")
+        await s.bb_set("research", bad)
+        await s.log("res", f"returned {_short(bad)} — well-shaped, plausible, and WRONG.", "warn")
+        await s.node("res", "flag")
+
+        consumed = 0
+        # draft reads it
+        await s.node("dra", "flag"); await s.link("orch_dra", "flow"); await asyncio.sleep(STEP); await s.link("orch_dra", "off")
+        await s.bb_set("draft", s.p["draft"])
+        await s.log("dra", pois["spread_log"] + " — built the creative off it.", "warn")
+        await s.node("dra", "flag"); consumed += 1
+
+        # validation reads it
+        await s.node("val", "flag"); await s.link("orch_val", "flow"); await asyncio.sleep(STEP); await s.link("orch_val", "off")
+        await s.bb_set("validation", s.p["validation"])
+        await s.log("val", pois["spread_log"] + " — checked the wrong campaign.", "warn")
+        await s.node("val", "flag"); consumed += 1
+
+        field, mx, got = gate["field"], gate["max"], bad.get(gate["field"])
+        if s.mode == "orchestrator":
+            # the chokepoint — validate at the merge point, before the irreversible step
+            await s.log("orch", f"merge gate — {field} is {got:,}, over the {mx:,} limit. REJECTED.", "warn")
+            await s.node("orch", "off", sub="gate — rejected the write")
+            await s.log("done", f"bad write caught at the gate — would have been: {pois['external']}. Not fired.", "good")
+            await s.status(f"poison caught at the gate — 0 external actions · {consumed} handlers touched it", "recovered")
+        else:
+            # no gatekeeper — the poison reaches the irreversible step and fires
+            await s.node("resp", "flag"); await s.link("val_resp", "reroute"); await asyncio.sleep(0.7); await s.link("val_resp", "off")
+            await s.bb_set("done", True); consumed += 1
+            await s.log("done", f"⚡ WOULD FIRE: {pois['external']} — not executed.", "warn")
+            await s.status(f"poison spread — {consumed} handlers acted on it · 1 external action", "stalled")
+        s.stopped = True
+    except asyncio.CancelledError:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # FINALE (compose only) — kept for the standalone "here is the plan" reveal.
 # ---------------------------------------------------------------------------
 

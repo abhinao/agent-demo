@@ -32,7 +32,7 @@ def _load_dotenv():
 _load_dotenv()
 
 from scenarios import SCENARIOS
-from agents import Session, run_case, run_plan, run_executed_plan
+from agents import Session, run_case, run_plan, run_executed_plan, run_poison
 
 app = FastAPI(title="agent-ops-sandbox")
 
@@ -84,6 +84,14 @@ async def ws(sock: WebSocket):
                 if cur["session"]:
                     # target = a specific step id (failure gallery); omit to kill the coordinator
                     await cur["session"].kill(msg.get("target"))
+
+            elif cmd == "poison":
+                # the contrasting demo — one handler returns a plausible, wrong result.
+                await cancel_current()
+                mode = msg.get("mode", "orchestrator")
+                session = Session(send, _cfg(msg), msg.get("scenario", "campaign"), mode)
+                cur["session"] = session
+                cur["task"] = asyncio.create_task(run_poison(session))
 
             elif cmd == "plan":
                 await cancel_current()

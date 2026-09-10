@@ -21,7 +21,7 @@
   .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
   .wrap{max-width:1180px;margin:0 auto;padding:22px 24px 40px}
 
-  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:6px}
   header h1{font-size:17px;font-weight:600;margin:0;letter-spacing:.2px}
   header .sub{color:var(--muted);font-size:13px;font-family:var(--mono)}
   .status{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--muted);
@@ -55,6 +55,18 @@
   .goalin:focus{outline:none;border-color:var(--warm)}
   .btn.plan{border-color:#3a3420;color:var(--warm);background:#221d10}
   .btn.plan:hover:not(:disabled){border-color:var(--work);background:#2a2313}
+  /* grouped clusters: run/kill actions, header utilities, finale band */
+  .actions{display:inline-flex;align-items:center;gap:8px}
+  .util{display:inline-flex;align-items:center;gap:8px;margin-left:6px}
+  .actions .lbl,.controls.finale .lbl{font-family:var(--mono);font-size:10.5px;color:var(--dim);
+    align-self:center;letter-spacing:.3px;padding-right:2px}
+  .controls.finale{border-top:none;padding-top:0;margin-top:-8px}
+  .btn.poison{border-color:var(--work-dim);color:var(--work);background:#2a2113}
+  .btn.poison:hover:not(:disabled){border-color:var(--work);background:#332813}
+  .btn.ghost{background:transparent;color:var(--muted)}
+  .btn.ghost:hover{border-color:var(--dim);color:var(--ink)}
+  .btn.ghost.on{color:var(--warm);border-color:#3a3420}
+  [hidden]{display:none!important}
 
   .stage{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;align-items:start}
   .stage.planning{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
@@ -197,7 +209,7 @@
   body.present .dot{width:12px;height:12px}
   body.present .stage{gap:26px}
   body.present .seg button,body.present .btn{font-size:18px;padding:12px 20px}
-  body.present .seg .lbl{font-size:14px}
+  body.present .seg .lbl,body.present .actions .lbl,body.present .controls.finale .lbl{font-size:14px}
   body.present .hint{font-size:16px}
   body.present .goalin{font-size:18px;padding:12px 16px;min-width:320px}
   body.present .card h2{font-size:17px;padding:16px 20px}
@@ -245,8 +257,8 @@
   body.light .goalin{background:#ffffff}
   body.light .btn.kill{color:#b3241f;background:#fdeceb;border-color:#f0b6b3}
   body.light .btn.kill:hover:not(:disabled){background:#fbdedb;border-color:var(--dead)}
-  body.light .btn.plan{color:#9a5a12;background:#fbf1dd;border-color:#e6cfa0}
-  body.light .btn.plan:hover:not(:disabled){background:#f6e8c8;border-color:var(--work)}
+  body.light .btn.plan,body.light .btn.poison{color:#9a5a12;background:#fbf1dd;border-color:#e6cfa0}
+  body.light .btn.plan:hover:not(:disabled),body.light .btn.poison:hover:not(:disabled){background:#f6e8c8;border-color:var(--work)}
   body.light.present #presentBtn{color:#9a5a12;background:#fbf1dd;border-color:#e6cfa0}
   /* request card */
   body.light .req .msg{color:#2a2f3a}
@@ -312,35 +324,45 @@
   <header>
     <h1>Agent ops console</h1>
     <span class="sub" id="caseTag">marketing suite</span>
-    <span class="status" id="status"><span class="dot"></span><span id="statusText">system healthy</span></span>
-    <button id="themeBtn" onclick="toggleTheme()" title="Theme (T) — light reads better on a projector in a lit room">dark theme</button>
-    <button id="presentBtn" onclick="togglePresent()" title="Presentation mode (P) — bigger text, fills the screen">presentation</button>
-  </header>
-
-  <div class="controls">
     <div class="seg" role="group" aria-label="Scenario">
       <span class="lbl">scenario</span>
       <button id="sCamp" class="on" onclick="setScenario('campaign')">campaign</button>
       <button id="sCrea" onclick="setScenario('creative')">creative</button>
     </div>
+    <span class="status" id="status"><span class="dot"></span><span id="statusText">system healthy</span></span>
+    <span class="util" role="group" aria-label="Display options">
+      <button id="themeBtn" onclick="toggleTheme()" title="Theme (T) — light reads better on a projector in a lit room">dark theme</button>
+      <button id="presentBtn" onclick="togglePresent()" title="Presentation mode (P) — bigger text, fills the screen">presentation</button>
+    </span>
+  </header>
+
+  <!-- primary demo: pick a topology, run the case, then inject a fault (kill or poison) -->
+  <div class="controls">
     <div class="seg" role="group" aria-label="Topology mode">
       <span class="lbl">mode</span>
       <button id="mBoss" class="on" onclick="setMode('boss')">orchestrator</button>
       <button id="mMesh" onclick="setMode('mesh')">hybrid mesh</button>
     </div>
     <button class="btn" id="runBtn" onclick="runCase()">Run case</button>
-    <button class="btn kill" id="killBtn" onclick="killOrch()" disabled>Kill orchestrator</button>
+    <div class="actions" role="group" aria-label="Inject a fault">
+      <span class="lbl">inject fault</span>
+      <button class="btn kill" id="killBtn" onclick="killOrch()" disabled>Kill</button>
+      <button class="btn poison" id="poisonBtn" onclick="poisonRun()">Poison</button>
+    </div>
     <button class="btn" id="resetBtn" onclick="resetAll()">Reset</button>
+    <button class="btn ghost" id="finaleToggle" onclick="toggleFinale()">Compose a plan…</button>
     <span class="spacer"></span>
     <span class="hint" id="hint">boss coordinates all three specialists</span>
   </div>
 
-  <div class="controls" style="border-top:none;border-bottom:1px solid var(--line);padding-top:0;margin-top:-8px">
-    <span class="seg lbl" style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">finale</span>
+  <!-- finale: compose an unseen goal into a plan and run it live (hidden until toggled) -->
+  <div class="controls finale" id="finaleRow" hidden>
+    <span class="lbl">finale</span>
     <input class="goalin" id="goalInput" placeholder="give the agent an unseen goal — it plans it live…"
            onkeydown="if(event.key==='Enter')executePlan()">
     <button class="btn plan" id="planBtn" onclick="composePlan()" style="display:none">Compose plan</button>
     <button class="btn plan" id="execBtn" onclick="executePlan()">Compose &amp; run</button>
+    <span class="spacer"></span>
     <span class="hint">claude composes the plan, then it runs under the topology · payloads stay fake</span>
   </div>
 
@@ -399,7 +421,7 @@
         <button id="ctBB" onclick="showCaseTab('bb')">blackboard</button>
         <span class="gencap" id="caseCap">shared state · updates live</span>
       </div>
-      <div class="log" id="log"><div class="empty">Press <b>Run case</b> to work the request. Kill the orchestrator mid-case to see what the topology does.</div></div>
+      <div class="log" id="log"><div class="empty">Press <b>Run case</b> to work the request, then inject a fault — <b>Kill</b> the coordinator mid-run, or <b>Poison</b> a write — to see what the topology does.</div></div>
       <div id="caseBB" class="bbpanel" style="display:none"></div>
       <div id="genPanel" style="display:none">
         <div class="gentabs">
@@ -521,15 +543,15 @@ function resetAll(){
   ['req','orch','res','dra','val','resp'].forEach(id=>setNode(id,null));
   paintLabels();
   document.querySelectorAll('.lk').forEach(l=>l.classList.remove('flow','reroute','dead'));
-  $('log').innerHTML='<div class="empty">Press <b>Run case</b> to work the request. Kill the orchestrator mid-case to see what the topology does.</div>';
+  $('log').innerHTML='<div class="empty">Press <b>Run case</b> to work the request, then inject a fault — <b>Kill</b> the coordinator mid-run, or <b>Poison</b> a write — to see what the topology does.</div>';
   showNormalView();
-  $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('resetBtn').disabled=false;
+  $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('poisonBtn').disabled=!wsReady(); $('resetBtn').disabled=false;
   $('planBtn').disabled=!wsReady(); $('execBtn').disabled=!wsReady();
   setStatus(wsReady()?'system healthy':'connecting…', wsReady()?null:'offline');
 }
 
 /* ------- terminal: any status event ends the case ------- */
-function endCase(){ S.running=false; $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('planBtn').disabled=!wsReady(); $('execBtn').disabled=!wsReady(); }
+function endCase(){ S.running=false; $('runBtn').disabled=!wsReady(); $('killBtn').disabled=true; $('poisonBtn').disabled=!wsReady(); $('planBtn').disabled=!wsReady(); $('execBtn').disabled=!wsReady(); }
 
 /* ---------------------------------------------------------------------------
  * WEBSOCKET — the data source. Every backend event maps 1:1 to a paint call.
@@ -540,8 +562,8 @@ function wsReady(){ return wsOpen; }
 function connect(){
   const proto = location.protocol==='https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto+'://'+location.host+'/ws');
-  ws.onopen = ()=>{ wsOpen=true; if(!S.running){ $('runBtn').disabled=false; $('planBtn').disabled=false; $('execBtn').disabled=false; setStatus('system healthy',null); } };
-  ws.onclose= ()=>{ wsOpen=false; S.running=false; $('runBtn').disabled=true; $('killBtn').disabled=true;
+  ws.onopen = ()=>{ wsOpen=true; if(!S.running){ $('runBtn').disabled=false; $('poisonBtn').disabled=false; $('planBtn').disabled=false; $('execBtn').disabled=false; setStatus('system healthy',null); } };
+  ws.onclose= ()=>{ wsOpen=false; S.running=false; $('runBtn').disabled=true; $('killBtn').disabled=true; $('poisonBtn').disabled=true;
                     $('planBtn').disabled=true; $('execBtn').disabled=true; setStatus('backend offline','offline'); setTimeout(connect,1200); };
   ws.onmessage = ev=>{
     const m=JSON.parse(ev.data);
@@ -550,8 +572,8 @@ function connect(){
                      setNode(m.id,m.state);
                      if(m.label!==undefined){ const e1=$('lbl_'+m.id+'1'); if(e1) e1.textContent=m.label; }
                      if(m.sub!==undefined){   const e2=$('lbl_'+m.id+'2'); if(e2) e2.textContent=m.sub; }
-                     if(m.id==='orch' && m.state==='off') $('killBtn').disabled=true;
-                     if(m.id==='orch' && m.state==='off') $('lbl_orch2').textContent='offline';
+                     if(m.id==='orch' && m.state==='off'){ $('killBtn').disabled=true;
+                       if(m.sub===undefined) $('lbl_orch2').textContent='offline'; }   // poison sends its own sub
                      updateCaseBadges();
                      break;
       case 'link':   if(m.from!==undefined){ if(EG.active) EG.setLink(m.from,m.to,m.state); break; }
@@ -574,7 +596,7 @@ function runCase(){
   S.running=true;
   BB={}; BBSEEN=[]; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=true;
   $('caseBB').innerHTML=''; $('caseTabs').style.display=''; showCaseTab('log');
-  $('runBtn').disabled=true; $('killBtn').disabled=false; setStatus('working the case…',null);
+  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=false; setStatus('working the case…',null);
   send({cmd:'run', scenario:S.scene, mode: S.mode==='boss'?'orchestrator':'mesh'});
 }
 
@@ -582,6 +604,27 @@ function killOrch(){
   if(!S.running) return;
   $('killBtn').disabled=true;
   send({cmd:'kill'});
+}
+
+/* poison: start a run where one handler returns a plausible, wrong result.
+   Orchestrator catches it at the merge gate; the mesh spreads it. */
+function poisonRun(){
+  if(!wsReady()) return;
+  resetAll(); S.running=true;
+  BB={}; BBSEEN=[]; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=false;
+  $('caseBB').innerHTML=''; $('caseTabs').style.display=''; showCaseTab('log');
+  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=true;
+  setStatus('injecting a poisoned write…',null);
+  send({cmd:'poison', scenario:S.scene, mode: S.mode==='boss'?'orchestrator':'mesh'});
+}
+
+/* finale is hidden by default — this reveals/hides the compose row */
+function toggleFinale(){
+  const r=$('finaleRow'), show=r.hidden;
+  r.hidden=!show;
+  $('finaleToggle').textContent = show ? 'Hide plan composer' : 'Compose a plan…';
+  $('finaleToggle').classList.toggle('on', show);
+  if(show) $('goalInput').focus();
 }
 
 function composePlan(){
@@ -592,7 +635,7 @@ function composePlan(){
   showPlanView();
   $('planGraph').innerHTML='<div class="thinking">orchestrator is composing a plan for<br><b>'+esc(goal)+'</b> …</div>';
   $('genOut').textContent=''; $('genCap').textContent='waiting for claude…';
-  $('runBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true;
+  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true;
   setStatus('composing a plan…',null);
   send({cmd:'plan', scenario:S.scene, goal});
 }
@@ -765,7 +808,7 @@ function executePlan(){
   $('leftHead').textContent=(S.mode==='boss'?'Orchestrator':'Mesh')+' execution';
   $('planGraph').innerHTML='<div class="thinking">composing a plan for<br><b>'+esc(goal)+'</b> …</div>';
   $('genOut').textContent=''; $('genCap').textContent='waiting for claude…';
-  $('runBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true; $('execBtn').disabled=true;
+  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=true; $('planBtn').disabled=true; $('execBtn').disabled=true;
   setStatus('composing a plan…',null);
   send({cmd:'execute', scenario:S.scene, goal, mode:S.mode==='boss'?'orchestrator':'mesh'});
 }
