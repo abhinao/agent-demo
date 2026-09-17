@@ -105,6 +105,45 @@ does not replace validation. You want both. Run it (pure stdlib — no venv, no 
 python3 backend/poison_demo.py
 ```
 
+### What about a crash before the gate?
+
+A question from a reader: *a validation gate stopped the poison write, while scoping
+only reduced collateral reads — what evidence do you keep when a worker dies after
+touching shared state but before the gate runs?*
+
+The gate and scoping are both **runtime** guards — scoping limits *who can read*, the
+gate blocks an unvalidated value from the irreversible step. Neither is **forensics**.
+A worker that writes to the board and then dies *before the gate runs* is the
+intersection of both demos: a write of unknown validity is on the board, and the thing
+that would judge it is gone — in the orchestrator, the dying worker can be the very
+coordinator that runs the gate, so it never fires and the case stalls with the value
+still sitting there.
+
+You can't interrogate a dead worker, so the evidence has to live in the write itself. A
+board built for this records, per write:
+
+- **provenance** — who wrote it, when, and from which inputs, so blast radius is
+  reconstructable after the writer is gone;
+- **a `validated` bit, default false** — the value is "written but unjudged" until a
+  gate stamps it; the *absence* of a gate-pass is itself the evidence it died unvalidated;
+- **a read log** — who consumed the key before the gate ran; in the mesh, that ledger
+  *is* the blast radius;
+- **write intent** — the atomicity boundary, so a torn write (`k1` written, `k2` not)
+  isn't mistaken for a complete one.
+
+With those, a mid-flight death leaves an honest trail — *written, never validated, read
+by X and Y* — which is enough to **quarantine and recompute**: the payloads are derived,
+so you re-run from the last validated input and never need the dead worker.
+
+In this sandbox the blackboard is a plain last-write-wins dict. The only evidence it
+keeps is the ordered `bb` write-event stream (how the UI mirrors state) and the
+role-tagged case log — *who wrote what, in what order*, but **no `validated` bit and no
+read log**. That's deliberate (a topology demo, not a durability one), and it's the same
+"no provenance" property that lets the mesh spread the poison in the first place. So the
+argument has three controls, not two: **scoping contains, the gate prevents, and a
+provenance log is what lets you recover** — and the crash-before-gate case is the one
+that needs the third.
+
 ## Layout
 
 ```
