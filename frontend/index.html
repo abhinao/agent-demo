@@ -188,6 +188,8 @@
   #caseBB{height:472px}                  /* run case: matches the case log height */
   .bbpanel .bbrow{padding:1px 6px;border-radius:5px;transition:background .35s}
   .bbpanel .bbnew{background:#16241f}
+  .bbpanel .bbprov{padding:1px 6px 5px 20px;font-size:12px;color:var(--muted);letter-spacing:.2px}
+  .bbpanel .pv-no{color:var(--work)} .bbpanel .pv-rej{color:var(--dead)} .bbpanel .pv-ok{color:var(--live)}
   .bbpanel .bbkey{color:#9db4ff}
   .bbpanel .bbstr{color:#8fe6c2}
   .bbpanel .bbnum{color:var(--warm)}
@@ -526,7 +528,7 @@ function showNormalView(){
   $('planGraph').style.display='none'; $('topoSvg').style.display='';
   $('genPanel').style.display='none';  $('log').style.display='';
   $('planGraph').innerHTML=''; $('genOut').textContent=''; $('genCap').textContent='';
-  BB={}; BBSEEN=[]; if($('bbPanel')){ $('bbPanel').style.display='none'; $('bbPanel').innerHTML=''; }
+  BB={}; BBSEEN=[]; BBPROV={}; if($("bbPanel")){ $('bbPanel').style.display='none'; $('bbPanel').innerHTML=''; }
   BBEL='bbPanel'; EG.badge={}; CASEBADGES=false;
   if($('caseTabs'))$('caseTabs').style.display='none';
   if($('caseBB')){ $('caseBB').style.display='none'; $('caseBB').innerHTML=''; }
@@ -580,7 +582,9 @@ function connect(){
                      setLink(m.id,m.state); break;
       case 'log':    addLog(m.role,m.text,m.cls); break;
       case 'status': setStatus(m.text,m.cls); endCase(); break;
-      case 'bb':     bbUpdate(m.key,m.value); break;
+      case 'bb':     bbUpdate(m.key,m.value, (m.writer!==undefined)?{writer:m.writer,inputs:m.inputs||[],validated:m.validated,readers:[]}:null); break;
+      case 'read':   bbRead(m.reader,m.key); break;
+      case 'gate':   bbGate(m.key,m.ok); break;
       case 'graph':  renderExecGraph(m); break;
       case 'plan':   renderPlan(m); break;
     }
@@ -594,7 +598,7 @@ function runCase(){
   if(!wsReady()) return;
   resetAll();
   S.running=true;
-  BB={}; BBSEEN=[]; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=true;
+  BB={}; BBSEEN=[]; BBPROV={}; EG.lastKey=null; BBEL="caseBB"; CASEBADGES=true;
   $('caseBB').innerHTML=''; $('caseTabs').style.display=''; showCaseTab('log');
   $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=false; setStatus('working the case…',null);
   send({cmd:'run', scenario:S.scene, mode: S.mode==='boss'?'orchestrator':'mesh'});
@@ -607,13 +611,15 @@ function killOrch(){
 }
 
 /* poison: start a run where one handler returns a plausible, wrong result.
-   Orchestrator catches it at the merge gate; the mesh spreads it. */
+   Orchestrator catches it at the merge gate; the mesh spreads it. Kill stays
+   live — crash the coordinator before the gate to see what evidence survives
+   (writer / validated? / who read it) in the blackboard tab. */
 function poisonRun(){
   if(!wsReady()) return;
   resetAll(); S.running=true;
-  BB={}; BBSEEN=[]; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=false;
+  BB={}; BBSEEN=[]; BBPROV={}; EG.lastKey=null; BBEL='caseBB'; CASEBADGES=false;
   $('caseBB').innerHTML=''; $('caseTabs').style.display=''; showCaseTab('log');
-  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=true;
+  $('runBtn').disabled=true; $('poisonBtn').disabled=true; $('killBtn').disabled=false;
   setStatus('injecting a poisoned write…',null);
   send({cmd:'poison', scenario:S.scene, mode: S.mode==='boss'?'orchestrator':'mesh'});
 }
@@ -849,7 +855,7 @@ EG.setLink=function(from,to,state){
 
 function renderExecGraph(m){
   EG.active=true; EG.nodes={}; EG.edges={}; EG.pos={}; EG.terminals=m.terminals||[];
-  GEN={json:m.json||'', code:m.code||''}; BB={}; BBSEEN=[]; EG.badge={}; EG.lastKey=null; EG._flipped=false; BBEL='bbPanel';
+  GEN={json:m.json||"", code:m.code||""}; BB={}; BBSEEN=[]; BBPROV={}; EG.badge={}; EG.lastKey=null; EG._flipped=false; BBEL='bbPanel';
   showTab('json');   // the beat: show the code the model just wrote; flips to blackboard on first write
   $('genCap').textContent=(m.source==='live'?'composed live':'recorded fallback')+' · '+m.steps.length+' steps';
   const steps=withHuman(m.steps);
@@ -884,7 +890,7 @@ function renderExecGraph(m){
 }
 
 /* ---- side blackboard: live shared state + awaiting badges ---- */
-var BB={}, BBSEEN=[], BBEL='bbPanel', CASEBADGES=false;
+var BB={}, BBSEEN=[], BBPROV={}, BBEL='bbPanel', CASEBADGES=false;
 function showCaseTab(which){
   const bb = which==='bb';
   $('ctLog').classList.toggle('on', !bb);
@@ -936,12 +942,25 @@ function renderBB(){
   BBSEEN.forEach(function(k,i){
     var hot = k===EG.lastKey ? ' bbnew' : '';
     h+='<div class="bbrow'+hot+'">&nbsp;&nbsp;<span class="bbkey">"'+esc(k)+'"</span><span class="bbpn">: </span>'+bbFmt(BB[k])+(i<BBSEEN.length-1?'<span class="bbpn">,</span>':'')+'</div>';
+    h+=bbProvLine(k);
   });
   h+='<span class="bbpn">}</span>'; el.innerHTML=h;
 }
-function bbUpdate(key,value){
+// provenance annotation under a row: writer · validated? · who read it
+function bbProvLine(k){
+  var p=BBPROV[k]; if(!p) return '';
+  var vc = p.validated===true ? '<span class="pv-ok">validated</span>'
+         : p.validated===false ? '<span class="pv-rej">rejected at gate</span>'
+         : '<span class="pv-no">unvalidated</span>';
+  var rd = (p.readers && p.readers.length) ? ' · read by '+esc(p.readers.join(', ')) : '';
+  return '<div class="bbprov">↳ '+esc(p.writer)+' · '+vc+rd+'</div>';
+}
+function bbRead(reader,key){ var p=BBPROV[key]; if(p){ if(p.readers.indexOf(reader)<0) p.readers.push(reader); renderBB(); } }
+function bbGate(key,ok){ var p=BBPROV[key]; if(p){ p.validated=ok; renderBB(); } }
+function bbUpdate(key,value,prov){
   if(!(key in BB)) BBSEEN.push(key);
   BB[key]=value; EG.lastKey=key;
+  if(prov) BBPROV[key]=prov;
   if(EG.active && !EG._flipped){ EG._flipped=true; showTab('bb'); }  // beat over → flip to the live blackboard
   renderBB(); egUpdateBadges(); updateCaseBadges();
   setTimeout(function(){ if(EG.lastKey===key){ EG.lastKey=null; renderBB(); } }, 750);

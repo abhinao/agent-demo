@@ -144,12 +144,13 @@ argument has three controls, not two: **scoping contains, the gate prevents, and
 provenance log is what lets you recover** — and the crash-before-gate case is the one
 that needs the third.
 
-Runnable, same as the others — it plays the crash on a plain dict vs a provenance
-board and prints the surviving evidence trail (write log, read log, who to unwind):
-
-```bash
-python3 backend/provenance_demo.py
-```
+**This is live in the web demo.** Run **Poison**, then hit **Kill** to crash the
+coordinator before the gate — the **blackboard** tab shows the surviving evidence:
+each write tagged with its writer, whether it was `validated` / `rejected at gate` /
+still `unvalidated`, and who read it. Let a Poison run finish instead and you see the
+gate stamp `audience` *rejected* (orchestrator) or every key stay *unvalidated* and
+the read-by list fan out (mesh). The blackboard is provenance-carrying only on the
+Poison path; a normal Run/Kill leaves it a plain dict, as before.
 
 ## Layout
 
@@ -159,7 +160,6 @@ backend/agents.py      blackboard + worker handlers + both run modes + kill + pl
 backend/planner.py     the FINALE — one real Anthropic call, forced emit_plan, validation
 backend/scenarios.py   the two scenario configs (log text + tiny fake payloads + catalog)
 backend/poison_demo.py the poison-write / blast-radius demo (standalone CLI, stdlib only)
-backend/provenance_demo.py  crash-before-the-gate: plain dict vs a provenance board (CLI, stdlib)
 frontend/index.html    the existing UI, rewired to consume the ws feed
 ```
 
@@ -206,14 +206,14 @@ New client → backend command: `{"cmd":"plan","scenario":"campaign","goal":"<un
 
 ## Run
 
-The two CLI demos are a single command each, no setup:
+The **poison-write** CLI is a single command, no setup:
 
 ```bash
 python3 backend/poison_demo.py         # blast-radius trace across the three topologies
-python3 backend/provenance_demo.py     # crash-before-the-gate: what evidence survives
 ```
 
-The **kill-the-coordinator** demo is the web app:
+The **kill-the-coordinator** and **poison-write** demos are both the web app (poison
+also runs live there, with provenance in the blackboard tab — see above):
 
 ```bash
 cd backend

@@ -73,6 +73,13 @@ class Session:
         self.step_tasks = {}
         self.completed = 0
 
+        # provenance state (poison run) — append-only write/read log + gate flags
+        self.prov = {}                   # key -> {writer, inputs, validated, readers}
+        self._seq = 0
+        self.poison_active = False
+        self.poison_killed = False
+        self.gate_reached = False
+
     def spawn(self, coro):
         t = asyncio.create_task(coro)
         self.all_tasks.append(t)
@@ -108,7 +115,37 @@ class Session:
         self.bb[key] = value
         await self.send({"type": "bb", "key": key, "value": value})
 
+    # --- provenance-carrying shared state (used by the poison run) ------------
+    def _tick(self):
+        self._seq += 1
+        return self._seq
+
+    async def bb_write(self, key, value, writer, inputs):
+        """A write that carries its own provenance — who wrote it, from which
+        inputs, and (implicitly) unvalidated until a gate stamps it. The record
+        is what survives a crash before the gate runs."""
+        self.bb[key] = value
+        self.prov[key] = {"writer": writer, "inputs": list(inputs), "validated": None, "readers": []}
+        await self.send({"type": "bb", "key": key, "value": value, "seq": self._tick(),
+                         "writer": writer, "inputs": list(inputs), "validated": None})
+
+    async def bb_read(self, reader, key):
+        """Record a read — who consumed a key before any gate ran (blast radius)."""
+        p = self.prov.get(key)
+        if p is not None and reader not in p["readers"]:
+            p["readers"].append(reader)
+        await self.send({"type": "read", "reader": reader, "key": key, "seq": self._tick()})
+
+    async def bb_gate(self, key, ok):
+        """A gate judges a value: True = validated, False = rejected."""
+        if key in self.prov:
+            self.prov[key]["validated"] = ok
+        await self.send({"type": "gate", "key": key, "ok": ok, "seq": self._tick()})
+
     async def kill(self, target=None):
+        if self.poison_active:
+            await self._poison_kill()
+            return
         if self.kind == "exec":
             if target:
                 await self._kill_node(target)
@@ -152,6 +189,32 @@ class Session:
             t.cancel()
         await self.log("system", f"{sid} killed. its dependents can't proceed; independent branches continue.", "warn")
         self.spawn(_exec_partial_watchdog(self))
+
+    # --- poison run: crash the coordinator before the gate runs --------------
+    async def _poison_kill(self):
+        if self.gate_reached or self.stopped:
+            return                       # too late — the gate already ran
+        self.poison_killed = True
+        await self.node("orch", "off", sub="crashed — before the gate")
+        await self.log("system", "coordinator crashed mid-flight — the gate never ran.", "warn")
+
+    async def _emit_poison_evidence(self):
+        """The gate never ran. Reconstruct what survives from the write/read log:
+        which writes were never validated, what derived from the poison, and who
+        read it — none of which needs the dead worker."""
+        unval = [k for k, p in self.prov.items() if p["validated"] is None]
+        tainted, changed = {"audience"}, True
+        while changed:
+            changed = False
+            for k, p in self.prov.items():
+                if k not in tainted and any(i in tainted for i in p["inputs"]):
+                    tainted.add(k); changed = True
+        consumers = sorted({r for k in tainted for r in self.prov.get(k, {}).get("readers", [])})
+        await self.log("system", "evidence from the write/read log (the dead worker isn't needed):", "warn")
+        await self.log("system", f"unvalidated writes: {', '.join(unval) or 'none'} · consumers: {', '.join(consumers) or 'none'}", "warn")
+        await self.log("done", f"recoverable — quarantine {sorted(tainted)}, recompute from the last validated input.", "good")
+        await self.status(f"crashed before the gate — {len(unval)} writes unvalidated, read by {', '.join(consumers) or 'no one'}", "stalled")
+        self.stopped = True
 
 
 # ---------------------------------------------------------------------------
@@ -268,6 +331,7 @@ def _short(v):
     return str(v)
 
 async def run_poison(s):
+    s.poison_active = True                          # Kill now crashes the coordinator (see _poison_kill)
     try:
         pois = s.cfg["poison"]
         bad, gate = pois["research"], pois["gate"]
@@ -277,38 +341,47 @@ async def run_poison(s):
         await s.node("orch", "active"); await s.log("orch", s.g["dispatch"]); await asyncio.sleep(0.5); await s.node("orch", "done")
         await s.bb_set("request", s.cfg["request"])
 
-        # research writes the POISON (config-injected — the handler itself is untouched)
+        # research writes the POISON as `audience` (config-injected — handler untouched)
         await s.node("res", "flag"); await s.link("orch_res", "flow"); await asyncio.sleep(STEP); await s.link("orch_res", "off")
-        await s.bb_set("research", bad)
-        await s.log("res", f"returned {_short(bad)} — well-shaped, plausible, and WRONG.", "warn")
+        await s.bb_write("audience", bad, writer="research", inputs=["request"])
+        await s.log("res", f"wrote audience = {_short(bad)} — well-shaped, plausible, and WRONG.", "warn")
         await s.node("res", "flag")
+        if s.poison_killed: return await s._emit_poison_evidence()
 
-        consumed = 0
-        # draft reads it
+        # draft reads audience -> writes creative
         await s.node("dra", "flag"); await s.link("orch_dra", "flow"); await asyncio.sleep(STEP); await s.link("orch_dra", "off")
-        await s.bb_set("draft", s.p["draft"])
-        await s.log("dra", pois["spread_log"] + " — built the creative off it.", "warn")
-        await s.node("dra", "flag"); consumed += 1
+        await s.bb_read("draft", "audience")
+        await s.bb_write("creative", s.p["draft"], writer="draft", inputs=["audience"])
+        await s.log("dra", pois["spread_log"] + " — wrote the creative off it.", "warn")
+        await s.node("dra", "flag")
+        if s.poison_killed: return await s._emit_poison_evidence()
 
-        # validation reads it
+        # validation reads audience + creative -> writes brand_ok
         await s.node("val", "flag"); await s.link("orch_val", "flow"); await asyncio.sleep(STEP); await s.link("orch_val", "off")
-        await s.bb_set("validation", s.p["validation"])
+        await s.bb_read("validation", "audience"); await s.bb_read("validation", "creative")
+        await s.bb_write("brand_ok", s.p["validation"], writer="validation", inputs=["audience", "creative"])
         await s.log("val", pois["spread_log"] + " — checked the wrong campaign.", "warn")
-        await s.node("val", "flag"); consumed += 1
+        await s.node("val", "flag")
+        if s.poison_killed: return await s._emit_poison_evidence()
 
+        # reached the merge point — the gate runs here (or, in the mesh, doesn't exist)
+        s.gate_reached = True
         field, mx, got = gate["field"], gate["max"], bad.get(gate["field"])
+        readers = ", ".join(s.prov["audience"]["readers"]) or "no one"
         if s.mode == "orchestrator":
             # the chokepoint — validate at the merge point, before the irreversible step
             await s.log("orch", f"merge gate — {field} is {got:,}, over the {mx:,} limit. REJECTED.", "warn")
+            await s.bb_gate("audience", False)
             await s.node("orch", "off", sub="gate — rejected the write")
             await s.log("done", f"bad write caught at the gate — would have been: {pois['external']}. Not fired.", "good")
-            await s.status(f"poison caught at the gate — 0 external actions · {consumed} handlers touched it", "recovered")
+            await s.status(f"poison caught at the gate — 0 external actions · audience read by {readers}", "recovered")
         else:
             # no gatekeeper — the poison reaches the irreversible step and fires
             await s.node("resp", "flag"); await s.link("val_resp", "reroute"); await asyncio.sleep(0.7); await s.link("val_resp", "off")
-            await s.bb_set("done", True); consumed += 1
+            await s.bb_read("activate", "audience"); await s.bb_read("activate", "brand_ok")
+            await s.bb_write("activation", {"fired": True}, writer="activate", inputs=["brand_ok", "audience"])
             await s.log("done", f"⚡ WOULD FIRE: {pois['external']} — not executed.", "warn")
-            await s.status(f"poison spread — {consumed} handlers acted on it · 1 external action", "stalled")
+            await s.status("poison spread — 3 handlers acted on it · 1 external action · nothing validated", "stalled")
         s.stopped = True
     except asyncio.CancelledError:
         pass
