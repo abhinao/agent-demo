@@ -4,6 +4,14 @@ A self-contained demo backend for the "kill the orchestrator" moment. The kill i
 **real**: the orchestrator is an actual `asyncio` task and the kill command
 `cancel()`s it. What happens next isn't scripted — it falls out of the topology.
 
+Different pieces, different setup:
+
+| Demo | How to run | Requirements |
+| --- | --- | --- |
+| Poison-write (standalone) | `python3 backend/poison_demo.py` | none — pure standard library, no venv, no API key, fully offline |
+| Kill-the-coordinator (web app) | `python app.py` | a virtualenv + `pip install -r backend/requirements.txt` |
+| Finale (optional, in the web app) | type a goal, **Compose** | an `ANTHROPIC_API_KEY`; without one it falls back to a recorded plan, so nothing breaks |
+
 - **Orchestrator mode** — one task drives research → draft → validation → activate
   in sequence. Kill it and the sequence stops mid-flight. Nothing owns the case,
   so it **stalls**.
